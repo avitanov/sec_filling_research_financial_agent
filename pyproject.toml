@@ -1,0 +1,9 @@
+[project]
+name = "final-project"
+version = "0.1.0"
+description = "Auditable SEC Filing Research"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "requests",
+]
