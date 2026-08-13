@@ -1,1 +1,12 @@
-.env.
+.env
+.env.*
+!.env.example
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.py[cod]
+
+# Downloaded SEC inputs and the cached SEC ticker mapping are reproducible local data.
+data/raw/
+data/company_tickers.json
