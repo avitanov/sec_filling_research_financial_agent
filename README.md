@@ -2,34 +2,47 @@
 
 ## SEC data collection
 
-The downloader requires only two CLI inputs:
+The downloader fetches a filing HTML document and SEC Company Facts JSON for
+each selected company. It saves local source metadata in `data/manifest.csv`.
 
-- `--companies`: one or more SEC-listed ticker symbols;
-- `--year`: the requested fiscal/report year.
+Create `.env` from `.env.example` and set the required SEC user agent:
 
-It resolves each ticker through SEC's company ticker mapping, finds the matching `10-K` in the SEC submissions data, and downloads the primary HTML filing, submissions JSON, and Company Facts JSON. The `--year` value matches the filing's `reportDate` year, not its filing date.
-
-The user does not provide a CIK, company name, accession number, filing date, or primary document filename. SEC supplies those values automatically, and the discovered metadata is saved in `data/manifest.csv`.
-
-Set the required SEC user-agent in the shell:
-
-```bash
-export SEC_USER_AGENT="Your Name your-email@example.com"
+```dotenv
+SEC_USER_AGENT="Your Name your-email@example.com"
 ```
 
-Download the 2025 statements for the three project companies:
+Download the project's three default companies for fiscal 2025:
+
+```bash
+uv run python scripts/download_data.py
+```
+
+Optional inputs are:
+
+- `--companies`: one or more SEC-listed ticker symbols;
+- `--year`: one or more requested fiscal/report years.
+- `--document-type` (or `--form`): the SEC filing form to download, such as `10-K` or `10-Q`.
+
+For example:
 
 ```bash
 uv run python scripts/download_data.py \
-  --companies GOOGL KO AMZN \
-  --year 2025
+  --companies KO AMZN \
+  --year 2025 \
+  --document-type 10-Q
 ```
 
-Other supported selections use the same interface:
+Downloaded files in `data/raw/` and the cached ticker map are local and ignored
+by Git. The manifest records their source URLs and SHA-256 checksums. The
+checksum integrity test confirms that local source files match the recorded
+frozen inputs; it does not affect retrieval or model behavior.
 
-```bash
-uv run python scripts/download_data.py --companies GOOGL --year 2025
-uv run python scripts/download_data.py --companies KO AMZN --year 2025
-```
+## Evaluation dataset
 
-The ticker mapping is cached at `data/company_tickers.json` and reused on later runs. Each company has one folder under `data/raw/` containing exactly three downloaded source files.
+The completed frozen gold dataset is stored in `data/evaluation/` and documented
+in [`data/evaluation/README.md`](data/evaluation/README.md).
+
+It contains 43 verified fact observations and 48 questions split into
+company-specific train, validation, and held-out test directories. Every
+selected observation is limited to the frozen 10-K accession and cross-checked
+against inline XBRL in the corresponding filing.
