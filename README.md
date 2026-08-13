@@ -46,3 +46,34 @@ It contains 43 verified fact observations and 48 questions split into
 company-specific train, validation, and held-out test directories. Every
 selected observation is limited to the frozen 10-K accession and cross-checked
 against inline XBRL in the corresponding filing.
+
+## Bedrock smoke tests
+
+The smoke test calls Haiku through the Bedrock Runtime Converse API and Luna
+through the Bedrock Mantle Responses API. Configure an AWS profile with access
+to the required models, then add its name and region to `.env`:
+
+```dotenv
+AWS_PROFILE="<your-aws-profile>"
+AWS_REGION="<your-aws-region>"
+```
+
+Authenticate using the method configured for that profile. For example, an AWS
+IAM Identity Center profile uses:
+
+```bash
+aws sso login --profile <your-aws-profile>
+```
+
+An active cached session can be reused until it expires. Run the selected model
+check directly with uv:
+
+```bash
+uv run python tests/smoke_test_model.py --model haiku
+uv run python tests/smoke_test_model.py --model luna
+```
+
+The smoke test sends one short `2 + 2` request to the selected model and prints
+the response and token usage. The default Haiku model ID is a US Bedrock Runtime
+inference profile. Luna uses Bedrock Mantle and explicitly sets
+`reasoning.effort=none`.
