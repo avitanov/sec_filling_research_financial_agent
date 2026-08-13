@@ -5,5 +5,7 @@ description = "Auditable SEC Filing Research"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "boto3",
+    "python-dotenv",
     "requests",
 ]
