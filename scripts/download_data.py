@@ -25,9 +25,7 @@ import requests
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "src"))
 
-from utils import write_json
-
-from config import (
+from config import (  # noqa: E402
     COMPANY_TICKERS_PATH,
     DEFAULT_COMPANIES,
     DEFAULT_DOCUMENT_TYPE,
@@ -41,8 +39,9 @@ from config import (
     SEC_TICKER_MAPPING_URL,
     SEC_USER_AGENT,
 )
-from exceptions import FilingNotFoundError
-from models import FilingMetadata
+from exceptions import FilingNotFoundError  # noqa: E402
+from models import FilingMetadata  # noqa: E402
+from utils import write_json  # noqa: E402
 
 MANIFEST_FIELDS = [
     "ticker",
@@ -72,6 +71,14 @@ def _sha256(path: Path) -> str:
 def _parse_arguments() -> argparse.Namespace:
     """Parse the ticker and report-year arguments."""
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--sync-manifest",
+        action="store_true",
+        help=(
+            "remove 10-K manifest rows whose local HTML file no longer exists; "
+            "does not call the SEC"
+        ),
+    )
     parser.add_argument(
         "--companies",
         nargs="+",
@@ -359,7 +366,11 @@ def _write_manifest(rows: list[dict[str, str]]) -> None:
     """Write all source rows to the single CSV manifest."""
     MANIFEST_PATH.parent.mkdir(parents=True, exist_ok=True)
     with MANIFEST_PATH.open("w", newline="", encoding="utf-8") as manifest_file:
-        writer = csv.DictWriter(manifest_file, fieldnames=MANIFEST_FIELDS)
+        writer = csv.DictWriter(
+            manifest_file,
+            fieldnames=MANIFEST_FIELDS,
+            lineterminator="\n",
+        )
         writer.writeheader()
         writer.writerows(rows)
 
@@ -382,9 +393,61 @@ def _update_manifest(downloaded_rows: list[dict[str, str]]) -> None:
     _write_manifest(existing_rows + downloaded_rows)
 
 
+def _sync_10k_manifest() -> None:
+    """Synchronize tracked 10-K rows with the HTML files currently in data/raw.
+
+    Raises:
+        SystemExit: If an existing file changed or an untracked 10-K is present.
+    """
+    rows = _read_manifest_rows()
+    tracked_10k_rows = [row for row in rows if row["source_type"] == "10-K HTML"]
+    tracked_paths = {
+        (PROJECT_ROOT / row["local_path"]).resolve(): row for row in tracked_10k_rows
+    }
+    raw_10k_paths = {path.resolve() for path in RAW_DATA_DIR.rglob("10-K-*.html")}
+    untracked_paths = sorted(raw_10k_paths - tracked_paths.keys())
+    if untracked_paths:
+        formatted_paths = ", ".join(
+            path.relative_to(PROJECT_ROOT).as_posix() for path in untracked_paths
+        )
+        raise SystemExit(
+            "Untracked 10-K HTML files cannot be added automatically because "
+            "their SEC provenance is missing from the manifest: "
+            f"{formatted_paths}. Add them with scripts/download_data.py."
+        )
+
+    retained_rows: list[dict[str, str]] = []
+    removed_rows: list[dict[str, str]] = []
+    for row in rows:
+        if row["source_type"] != "10-K HTML":
+            retained_rows.append(row)
+            continue
+        path = (PROJECT_ROOT / row["local_path"]).resolve()
+        if not path.is_file():
+            removed_rows.append(row)
+            continue
+        actual_checksum = _sha256(path)
+        if actual_checksum != row["sha256"]:
+            raise SystemExit(
+                f"Checksum mismatch for {row['local_path']}. The manifest was not "
+                "changed; download the filing again or review the source change."
+            )
+        retained_rows.append(row)
+
+    _write_manifest(retained_rows)
+    print("10-K manifest synchronization complete.")
+    print(f"Tracked 10-K files present: {len(tracked_10k_rows) - len(removed_rows)}")
+    print(f"Missing 10-K rows removed: {len(removed_rows)}")
+    for row in removed_rows:
+        print(f"  Removed: {row['ticker']} {row['report_year']} {row['local_path']}")
+
+
 def main() -> None:
     """Discover and download data for each requested ticker and report year."""
     arguments = _parse_arguments()
+    if arguments.sync_manifest:
+        _sync_10k_manifest()
+        return
     companies = arguments.companies or list(DEFAULT_COMPANIES)
     years = arguments.year or [DEFAULT_REPORT_YEAR]
     document_type = arguments.document_type.upper()
