@@ -126,6 +126,11 @@ Repeat validation independently:
 uv run python scripts/index_filings.py validate
 ```
 
+Use `validate` to confirm that the existing Qdrant collection still matches a
+fresh build of the chunks from the frozen source files. It checks evidence IDs,
+metadata payloads, and token limits without replacing the collection or calling
+the SEC.
+
 Search by company ticker and query:
 
 ```bash
