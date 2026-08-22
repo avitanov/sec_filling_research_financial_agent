@@ -11,5 +11,6 @@ __pycache__/
 qdrant_storage/
 
 # Downloaded SEC inputs and the cached SEC ticker mapping are reproducible local data.
-data/raw/
+data/raw/*
+!data/raw/.gitkeep
 data/company_tickers.json
