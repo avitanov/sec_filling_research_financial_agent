@@ -5,7 +5,30 @@ description = "Auditable SEC Filing Research"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "boto3",
-    "python-dotenv",
-    "requests",
+    "beautifulsoup4==4.14.2",
+    "boto3==1.43.69",
+    "fastembed==0.8.0",
+    "langchain-community==0.3.31",
+    "python-dotenv==1.2.2",
+    "qdrant-client==1.18.0",
+    "ragas==0.3.9",
+    "requests==2.34.2",
+    "sec-parser @ git+https://github.com/alphanome-ai/sec-parser.git@823d199e7eac62804ac9de1b744d97b72476fec5",
 ]
+
+[dependency-groups]
+dev = [
+    "ipykernel==7.3.0",
+    "jupyterlab==4.5.3",
+    "pytest==9.0.2",
+    "ruff==0.12.12",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
