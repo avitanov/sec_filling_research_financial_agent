@@ -5,7 +5,10 @@
 __pycache__/
 .pytest_cache/
 .ruff_cache/
+.ipynb_checkpoints/
+.cache/
 *.py[cod]
+qdrant_storage/
 
 # Downloaded SEC inputs and the cached SEC ticker mapping are reproducible local data.
 data/raw/
