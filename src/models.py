@@ -1,4 +1,4 @@
-"""Typed records shared by the SEC filing research code."""
+"""Define shared typed records for frozen filing parsing and retrieval."""
 
 import re
 from dataclasses import asdict, dataclass, field
@@ -287,7 +287,8 @@ class FilingChunk:
     parser_version: str
     printed_page: int | None
     supporting_page_ids: list[str]
-    supporting_page_sequences: list[int] ## tells you which physical filing pages supplied the chunk’s evidence.
+    # Physical filing pages that supplied this chunk's evidence.
+    supporting_page_sequences: list[int]
     section_title: str | None
     table_fragment_ids: list[str]
     continuation_group_id: str | None

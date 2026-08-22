@@ -10,6 +10,8 @@ load_dotenv(PROJECT_ROOT / ".env")
 
 RAW_DATA_DIR = PROJECT_ROOT / "data" / "raw"
 MANIFEST_PATH = PROJECT_ROOT / "data" / "manifest.csv"
+EVALUATION_DATA_DIR = PROJECT_ROOT / "data" / "evaluation"
+RUNS_DIR = PROJECT_ROOT / "data" / "runs"
 COMPANY_TICKERS_PATH = PROJECT_ROOT / "data" / "company_tickers.json"
 DEFAULT_COMPANIES: tuple[str, ...] = ("KO", "GOOGL", "AMZN")
 DEFAULT_REPORT_YEAR = 2025
@@ -30,6 +32,21 @@ BEDROCK_LUNA_MODEL_ID = os.getenv(
     "BEDROCK_LUNA_MODEL_ID", "openai.gpt-5.6-luna"
 ).strip()
 BEDROCK_MANTLE_TIMEOUT_SECONDS = int(os.getenv("BEDROCK_MANTLE_TIMEOUT_SECONDS", "30"))
+
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
+OPENROUTER_MODEL = os.getenv(
+    "OPENROUTER_MODEL", "z-ai/glm-5.2:free"
+).strip()
+OPENROUTER_BASE_URL = os.getenv(
+    "OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"
+).strip()
+OPENROUTER_TIMEOUT_SECONDS = 60
+OPENROUTER_MAX_RETRIES = 1
+OPENROUTER_MAX_TOKENS = 4096
+AGENT_MAX_TOOL_CALLS = 20
+AGENT_MAX_TURNS = 12
+AGENT_MAX_OUTPUT_TOKENS = 12_000
+AGENT_MAX_TOTAL_TOKENS = 80_000
 
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333").strip()
 QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "sec_filing_chunks_v1").strip()

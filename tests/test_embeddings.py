@@ -1,10 +1,7 @@
 """Check exact token accounting and long-context embedding configuration."""
 
-from pytest import MonkeyPatch
-
-import embeddings
 from config import QDRANT_DENSE_MAX_TOKENS
-from embeddings import build_chunk_token_report
+from retrieval.embeddings import build_chunk_token_report
 
 
 def test_all_filing_chunks_fit_without_truncation() -> None:

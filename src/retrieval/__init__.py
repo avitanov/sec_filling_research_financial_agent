@@ -1,4 +1,4 @@
-"""Persist and search filing chunks with local Qdrant hybrid retrieval."""
+"""Persist and search filing chunks through local Qdrant hybrid retrieval."""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ from typing import Any
 import requests
 from qdrant_client import QdrantClient, models
 
-from chunking import build_filing_chunks, load_filing_sources
 from config import (
     FILING_CHUNK_PARSER_VERSION,
     QDRANT_COLLECTION,
@@ -19,9 +18,10 @@ from config import (
     QDRANT_URL,
     RETRIEVAL_CANDIDATE_LIMIT,
 )
-from embeddings import embed_chunks, embed_query, validate_embedding_lengths
 from exceptions import FilingIndexError
 from models import FilingChunk, FilingSearchResult
+from retrieval.chunking import build_filing_chunks, load_filing_sources
+from retrieval.embeddings import embed_chunks, embed_query, validate_embedding_lengths
 
 DENSE_VECTOR_NAME = "dense"
 BM25_VECTOR_NAME = "bm25"

@@ -7,7 +7,6 @@ from typing import Any
 from fastembed import TextEmbedding
 from tokenizers import Tokenizer
 
-from chunking import build_filing_chunks, load_filing_sources
 from config import (
     PROJECT_ROOT,
     QDRANT_DENSE_MAX_TOKENS,
@@ -15,6 +14,7 @@ from config import (
 )
 from exceptions import ChunkValidationError
 from models import FilingChunk
+from retrieval.chunking import build_filing_chunks, load_filing_sources
 
 QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
 MODEL_CACHE_DIR = PROJECT_ROOT / ".cache" / "fastembed"
