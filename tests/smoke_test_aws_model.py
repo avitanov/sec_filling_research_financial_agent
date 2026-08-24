@@ -1,4 +1,4 @@
-"""Check the configured Haiku and Luna models through Amazon Bedrock."""
+"""Check configured Bedrock models with one small inference request."""
 
 import argparse
 import json
@@ -21,7 +21,6 @@ from botocore.exceptions import (
     UnauthorizedSSOTokenError,
 )
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
@@ -30,6 +29,7 @@ from config import (  # noqa: E402
     BEDROCK_HAIKU_MODEL_ID,
     BEDROCK_LUNA_MODEL_ID,
     BEDROCK_MANTLE_TIMEOUT_SECONDS,
+    BEDROCK_NOVA_LITE_MODEL_ID,
 )
 
 
@@ -94,7 +94,10 @@ def _check_response(response: requests.Response, model_id: str) -> None:
     )
 
 
-def _call_haiku() -> tuple[str, dict[str, Any]]:
+def _call_converse(
+    model_id: str,
+    model_name: str,
+) -> tuple[str, dict[str, Any]]:
     client = Session().client(
         "bedrock-runtime",
         region_name=AWS_REGION,
@@ -105,7 +108,7 @@ def _call_haiku() -> tuple[str, dict[str, Any]]:
     )
     try:
         body: dict[str, Any] = client.converse(
-            modelId=BEDROCK_HAIKU_MODEL_ID,
+            modelId=model_id,
             messages=[
                 {
                     "role": "user",
@@ -121,7 +124,7 @@ def _call_haiku() -> tuple[str, dict[str, Any]]:
     except ClientError as error:
         error_code = error.response.get("Error", {}).get("Code", "Unknown")
         raise RuntimeError(
-            f"Haiku failed through Bedrock Runtime ({error_code}). Confirm "
+            f"{model_name} failed through Bedrock Runtime ({error_code}). Confirm "
             "bedrock:InvokeModel permission and access to the configured "
             "inference profile."
         ) from error
@@ -132,7 +135,7 @@ def _call_haiku() -> tuple[str, dict[str, Any]]:
         if block.get("text")
     ]
     if not text_blocks:
-        raise RuntimeError(f"Haiku returned no text: {body}")
+        raise RuntimeError(f"{model_name} returned no text: {body}")
 
     return " ".join(text_blocks), body.get("usage", {})
 
@@ -167,13 +170,18 @@ def _call_luna() -> tuple[str, dict[str, Any]]:
 def main() -> None:
     """Send one small request to the selected model."""
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", choices=("haiku", "luna"), required=True)
+    parser.add_argument(
+        "--model", choices=("nova-lite", "haiku", "luna"), required=True
+    )
     args = parser.parse_args()
 
     try:
-        if args.model == "haiku":
+        if args.model == "nova-lite":
+            model_id = BEDROCK_NOVA_LITE_MODEL_ID
+            response_text, usage = _call_converse(model_id, "Nova Lite")
+        elif args.model == "haiku":
             model_id = BEDROCK_HAIKU_MODEL_ID
-            response_text, usage = _call_haiku()
+            response_text, usage = _call_converse(model_id, "Haiku")
         else:
             model_id = BEDROCK_LUNA_MODEL_ID
             response_text, usage = _call_luna()
