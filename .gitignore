@@ -9,6 +9,7 @@ __pycache__/
 .cache/
 *.py[cod]
 qdrant_storage/
+data/runs/
 
 # Downloaded SEC inputs and the cached SEC ticker mapping are reproducible local data.
 data/raw/*
