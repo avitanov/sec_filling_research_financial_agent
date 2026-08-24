@@ -3,7 +3,9 @@
 import re
 from dataclasses import asdict, dataclass, field
 from html.parser import HTMLParser
-from typing import Any
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from utils import compact_metadata, normalize_text
 
@@ -323,3 +325,94 @@ class FilingSearchResult:
     score: float
     text: str
     metadata: dict[str, Any]
+
+
+class QuestionInput(BaseModel):
+    """Store only the benchmark fields safe to expose during a run."""
+
+    question_id: str
+    split: str
+    ticker: str
+    company: str
+    category: str
+    question: str
+
+
+class AnswerValue(BaseModel):
+    """Represent one value stated in the final answer."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    label: str
+    value: str
+    unit: str | None
+    period: str | None
+
+
+class CalculationRecord(BaseModel):
+    """Represent one calculation reported by the agent."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    operation: Literal["add", "subtract", "divide", "percentage"]
+    inputs: list[str]
+    result: str
+
+
+class MonolithicAnswer(BaseModel):
+    """Define the structured output returned by the monolithic agent."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    answer_text: str
+    values: list[AnswerValue]
+    evidence_ids: list[str]
+    calculations: list[CalculationRecord]
+
+
+class ToolEvent(BaseModel):
+    """Record one canonical project-tool invocation."""
+
+    sequence: int
+    name: Literal["search_filing", "lookup_fact", "calculate"]
+    arguments: dict[str, Any]
+    success: bool
+    result: Any = None
+    error: str | None = None
+    evidence_ids: list[str] = Field(default_factory=list)
+    latency_ms: float
+
+
+class ModelCallEvent(BaseModel):
+    """Record token usage reported for one agent model cycle."""
+
+    sequence: int
+    model: str
+    token_usage: dict[str, int] = Field(default_factory=dict)
+
+
+class RunRecord(BaseModel):
+    """Store the complete observable record for one monolithic run."""
+
+    run_id: str
+    started_at: str
+    question: QuestionInput
+    architecture: Literal["monolithic"] = "monolithic"
+    provider: Literal["openrouter", "bedrock"]
+    model: str
+    reasoning_mode: str
+    status: Literal["success", "failure"]
+    answer: MonolithicAnswer | None = None
+    model_calls: list[ModelCallEvent] = Field(default_factory=list)
+    tool_events: list[ToolEvent] = Field(default_factory=list)
+    observable_timeline: list[dict[str, Any]] = Field(default_factory=list)
+    retry_events: list[dict[str, Any]] = Field(default_factory=list)
+    failure_category: str | None = None
+    failure_message: str | None = None
+    token_usage: dict[str, int] = Field(default_factory=dict)
+    pricing_usd_per_million_tokens: dict[str, str] = Field(default_factory=dict)
+    cost_usd: dict[str, str] = Field(default_factory=dict)
+    latency_ms: float
+    retries: int = 0
+    langfuse_trace_id: str | None = None
+    langfuse_trace_url: str | None = None
