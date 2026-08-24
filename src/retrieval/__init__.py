@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from functools import lru_cache
 from typing import Any
 
 import requests
@@ -22,6 +23,7 @@ from exceptions import FilingIndexError
 from models import FilingChunk, FilingSearchResult
 from retrieval.chunking import build_filing_chunks, load_filing_sources
 from retrieval.embeddings import embed_chunks, embed_query, validate_embedding_lengths
+from utils import normalize_ticker
 
 DENSE_VECTOR_NAME = "dense"
 BM25_VECTOR_NAME = "bm25"
@@ -29,8 +31,26 @@ BM25_MODEL = "qdrant/bm25"
 POINT_NAMESPACE = uuid.UUID("da771b9a-6215-44b3-bc4b-38c92ed6af8a")
 
 
+@lru_cache(maxsize=1)
 def _client() -> QdrantClient:
+    """Return the process-wide Qdrant client."""
     return QdrantClient(url=QDRANT_URL, timeout=QDRANT_TIMEOUT_SECONDS)
+
+
+@lru_cache(maxsize=1)
+def _frozen_tickers() -> frozenset[str]:
+    """Return the tickers represented by the frozen filing manifest."""
+    return frozenset(source.ticker for source in load_filing_sources())
+
+
+def check_qdrant() -> None:
+    """Verify that the frozen filing collection is available.
+
+    Raises:
+        FilingIndexError: If the filing collection does not exist.
+    """
+    if not _client().collection_exists(QDRANT_COLLECTION):
+        raise FilingIndexError(f"Qdrant collection {QDRANT_COLLECTION} is missing")
 
 
 def _point_id(evidence_id: str) -> str:
@@ -218,8 +238,8 @@ def search_filing(query: str, company: str, limit: int = 5) -> list[FilingSearch
     Returns:
         Ranked filing evidence with full audit metadata.
     """
-    ticker = company.upper().strip()
-    if ticker not in {source.ticker for source in load_filing_sources()}:
+    ticker = normalize_ticker(company)
+    if ticker not in _frozen_tickers():
         raise FilingIndexError(f"Unknown frozen company: {company}")
     company_filter = models.Filter(
         must=[

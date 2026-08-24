@@ -37,6 +37,18 @@ def load_embedding_model() -> TextEmbedding:
     return model
 
 
+@lru_cache(maxsize=1)
+def load_counting_tokenizer() -> Tokenizer:
+    """Load one non-truncating tokenizer for repeated token-count checks."""
+    model_tokenizer = load_embedding_model().model.tokenizer
+    if model_tokenizer is None:
+        raise ChunkValidationError("Embedding tokenizer did not load")
+    tokenizer = Tokenizer.from_str(model_tokenizer.to_str())
+    tokenizer.no_truncation()
+    tokenizer.no_padding()
+    return tokenizer
+
+
 def count_embedding_tokens(texts: list[str], prefix: str = "") -> list[int]:
     """Count exact model tokens before the embedding model can truncate them.
 
@@ -47,13 +59,7 @@ def count_embedding_tokens(texts: list[str], prefix: str = "") -> list[int]:
     Returns:
         One untruncated token count per input text.
     """
-    model_tokenizer = load_embedding_model().model.tokenizer
-    if model_tokenizer is None:
-        raise ChunkValidationError("Embedding tokenizer did not load")
-
-    tokenizer = Tokenizer.from_str(model_tokenizer.to_str())
-    tokenizer.no_truncation()
-    tokenizer.no_padding()
+    tokenizer = load_counting_tokenizer()
     encodings = tokenizer.encode_batch([prefix + text for text in texts])
     return [len(encoding.ids) for encoding in encodings]
 
