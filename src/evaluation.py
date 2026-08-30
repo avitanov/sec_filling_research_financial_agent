@@ -815,7 +815,7 @@ def save_evaluation_results(
     destination = (results_root or PROJECT_ROOT / "results") / (
         f"{timestamp}-{architecture}-{model_slug}-{ticker}"
     )
-    destination.mkdir(parents=True, exist_ok=True)
+    destination.mkdir(parents=True)
     with (destination / "runs.jsonl").open("w", encoding="utf-8") as output:
         for generated_record in generated_records:
             output.write(generated_record.model_dump_json() + "\n")
