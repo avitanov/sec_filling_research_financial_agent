@@ -31,10 +31,40 @@ BEDROCK_NOVA_LITE_MODEL_ID = os.getenv(
 # Amazon Bedrock on-demand text pricing in us-east-1, verified 2026-08-24.
 NOVA_LITE_INPUT_USD_PER_MILLION_TOKENS = Decimal("0.06")
 NOVA_LITE_OUTPUT_USD_PER_MILLION_TOKENS = Decimal("0.24")
+BEDROCK_SONNET_MODEL_ID = os.getenv(
+    "BEDROCK_SONNET_MODEL_ID",
+    "us.anthropic.claude-sonnet-4-5-20251001-v1:0",
+).strip()
+# Anthropic Claude Sonnet standard on-demand text pricing in us-east-1,
+# verified 2026-08-30.
+SONNET_INPUT_USD_PER_MILLION_TOKENS = Decimal("3.00")
+SONNET_OUTPUT_USD_PER_MILLION_TOKENS = Decimal("15.00")
 BEDROCK_HAIKU_MODEL_ID = os.getenv(
     "BEDROCK_HAIKU_MODEL_ID",
     "us.anthropic.claude-haiku-4-5-20251001-v1:0",
 ).strip()
+# Anthropic Claude Haiku 4.5 standard on-demand text pricing in us-east-1,
+# verified 2026-08-28.
+HAIKU_INPUT_USD_PER_MILLION_TOKENS = Decimal("1.10")
+HAIKU_OUTPUT_USD_PER_MILLION_TOKENS = Decimal("5.50")
+MODEL_TOKEN_PRICES: dict[str, tuple[Decimal, Decimal]] = {
+    BEDROCK_NOVA_LITE_MODEL_ID: (
+        NOVA_LITE_INPUT_USD_PER_MILLION_TOKENS,
+        NOVA_LITE_OUTPUT_USD_PER_MILLION_TOKENS,
+    ),
+    BEDROCK_SONNET_MODEL_ID: (
+        SONNET_INPUT_USD_PER_MILLION_TOKENS,
+        SONNET_OUTPUT_USD_PER_MILLION_TOKENS,
+    ),
+    BEDROCK_HAIKU_MODEL_ID: (
+        HAIKU_INPUT_USD_PER_MILLION_TOKENS,
+        HAIKU_OUTPUT_USD_PER_MILLION_TOKENS,
+    ),
+}
+EVALUATION_JUDGE_MODEL_ID = os.getenv(
+    "EVALUATION_JUDGE_MODEL_ID", BEDROCK_HAIKU_MODEL_ID
+).strip()
+EVALUATION_JUDGE_MAX_TOKENS = int(os.getenv("EVALUATION_JUDGE_MAX_TOKENS", "1200"))
 BEDROCK_LUNA_MODEL_ID = os.getenv(
     "BEDROCK_LUNA_MODEL_ID", "openai.gpt-5.6-luna"
 ).strip()

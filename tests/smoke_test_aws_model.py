@@ -30,6 +30,7 @@ from config import (  # noqa: E402
     BEDROCK_LUNA_MODEL_ID,
     BEDROCK_MANTLE_TIMEOUT_SECONDS,
     BEDROCK_NOVA_LITE_MODEL_ID,
+    BEDROCK_SONNET_MODEL_ID,
 )
 
 
@@ -112,11 +113,7 @@ def _call_converse(
             messages=[
                 {
                     "role": "user",
-                    "content": [
-                        {
-                            "text": "What is 2 + 2? Reply with only the number."
-                        }
-                    ],
+                    "content": [{"text": "What is 2 + 2? Reply with only the number."}],
                 }
             ],
             inferenceConfig={"maxTokens": 16, "temperature": 0},
@@ -171,7 +168,7 @@ def main() -> None:
     """Send one small request to the selected model."""
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--model", choices=("nova-lite", "haiku", "luna"), required=True
+        "--model", choices=("nova-lite", "sonnet", "haiku", "luna"), required=True
     )
     args = parser.parse_args()
 
@@ -179,6 +176,9 @@ def main() -> None:
         if args.model == "nova-lite":
             model_id = BEDROCK_NOVA_LITE_MODEL_ID
             response_text, usage = _call_converse(model_id, "Nova Lite")
+        elif args.model == "sonnet":
+            model_id = BEDROCK_SONNET_MODEL_ID
+            response_text, usage = _call_converse(model_id, "Sonnet")
         elif args.model == "haiku":
             model_id = BEDROCK_HAIKU_MODEL_ID
             response_text, usage = _call_converse(model_id, "Haiku")
