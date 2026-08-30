@@ -1,4 +1,4 @@
-"""Load runtime-safe benchmark questions and frozen company facts."""
+"""Load frozen benchmark questions and company facts."""
 
 from __future__ import annotations
 
@@ -10,6 +10,35 @@ from utils import normalize_ticker, read_jsonl, ticker_data_directory
 
 QUESTION_CACHE: dict[str, tuple[QuestionInput, ...]] = {}
 COMPANY_FACTS_CACHE: dict[str, list[dict[str, Any]]] = {}
+
+
+def load_frozen_records(ticker: str, filename: str) -> list[dict[str, Any]]:
+    """Load records from one frozen JSONL file for a benchmark company.
+
+    Args:
+        ticker: Frozen company ticker.
+        filename: JSONL filename inside the company's data directory.
+
+    Returns:
+        Records in their frozen file order.
+    """
+    _, ticker_directory = ticker_data_directory(EVALUATION_DATA_DIR, ticker)
+    return read_jsonl(ticker_directory / filename)
+
+
+def load_gold_questions(ticker: str) -> list[dict[str, Any]]:
+    """Load complete evaluation records, including gold answers.
+
+    Args:
+        ticker: Frozen company ticker.
+
+    Returns:
+        Question records in question-ID order.
+    """
+    return sorted(
+        load_frozen_records(ticker, "questions.jsonl"),
+        key=lambda record: record["question_id"],
+    )
 
 
 def load_questions(ticker: str | None = None) -> list[QuestionInput]:
@@ -86,9 +115,6 @@ def load_company_facts(ticker: str) -> list[dict[str, Any]]:
     if cached_facts is not None:
         return [dict(fact) for fact in cached_facts]
 
-    normalized_ticker, ticker_directory = ticker_data_directory(
-        EVALUATION_DATA_DIR, ticker
-    )
-    facts = read_jsonl(ticker_directory / "company_facts.jsonl")
+    facts = load_frozen_records(ticker, "company_facts.jsonl")
     COMPANY_FACTS_CACHE[normalized_ticker] = facts
     return [dict(fact) for fact in facts]

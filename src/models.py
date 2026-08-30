@@ -5,7 +5,7 @@ from dataclasses import asdict, dataclass, field
 from html.parser import HTMLParser
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from utils import compact_metadata, normalize_text
 
@@ -343,10 +343,25 @@ class AnswerValue(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    label: str
-    value: str
-    unit: str | None
-    period: str | None
+    label: str = Field(description="Short name of the reported financial value.")
+    value: str = Field(
+        description=(
+            "Plain decimal without commas, currency symbols, percent signs, or "
+            "magnitude words. USD uses absolute digits; percentages use exactly "
+            "two decimal places unless the question requests another precision."
+        )
+    )
+    unit: str | None = Field(description="Required unit: use USD or percent.")
+    period: str | None = Field(
+        description="Required fiscal period such as FY2025 or FY2024 to FY2025."
+    )
+    source_evidence_ids: list[str] = Field(
+        description=(
+            "Only evidence IDs returned by lookup_fact or search_filing. For a "
+            "calculated value, list the evidence IDs for its source inputs; never "
+            "invent a calculation ID."
+        )
+    )
 
 
 class CalculationRecord(BaseModel):
@@ -355,8 +370,12 @@ class CalculationRecord(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     operation: Literal["add", "subtract", "divide", "percentage"]
-    inputs: list[str]
-    result: str
+    inputs: list[str] = Field(
+        description="Exact plain-decimal inputs sent to the calculate tool."
+    )
+    result: str = Field(
+        description="Exact plain-decimal result returned by the calculate tool."
+    )
 
 
 class MonolithicAnswer(BaseModel):
@@ -365,9 +384,22 @@ class MonolithicAnswer(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     answer_text: str
-    values: list[AnswerValue]
-    evidence_ids: list[str]
+    values: list[AnswerValue] = Field(
+        description=(
+            "Only final values requested by the question. Do not repeat raw source "
+            "inputs or intermediate calculator values here."
+        )
+    )
+    evidence_ids: list[str] = Field(
+        description="All cited evidence IDs actually returned by retrieval tools."
+    )
     calculations: list[CalculationRecord]
+    conclusions: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Short factual conclusions stated in answer_text, or an empty list."
+        ),
+    )
 
 
 class ToolEvent(BaseModel):
@@ -389,6 +421,19 @@ class ModelCallEvent(BaseModel):
     sequence: int
     model: str
     token_usage: dict[str, int] = Field(default_factory=dict)
+
+
+class JudgeScores(BaseModel):
+    """Store qualitative evaluation scores returned by the LLM judge."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    llm_answer_correctness_grade: int = Field(ge=1, le=5)
+    workflow_correctness: int = Field(ge=1, le=5)
+    chronological_coherence: int = Field(ge=1, le=5)
+    workflow_efficiency: int = Field(ge=1, le=5)
+    auditability: int = Field(ge=1, le=5)
+    explanation: str
 
 
 class RunRecord(BaseModel):
@@ -414,5 +459,39 @@ class RunRecord(BaseModel):
     cost_usd: dict[str, str] = Field(default_factory=dict)
     latency_ms: float
     retries: int = 0
+    structured_output_repairs: int = 0
     langfuse_trace_id: str | None = None
     langfuse_trace_url: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _default_legacy_answer_fields(cls, data: Any) -> Any:
+        """Fill fields absent from persisted runs created before audit upgrades."""
+        if not isinstance(data, dict) or not isinstance(data.get("answer"), dict):
+            return data
+        answer = data["answer"]
+        values = answer.get("values")
+        if not isinstance(values, list):
+            return data
+        evidence_ids = answer.get("evidence_ids", [])
+        updated_values = []
+        for value in values:
+            if not isinstance(value, dict):
+                updated_values.append(value)
+                continue
+            updated_values.append(
+                {
+                    **value,
+                    "source_evidence_ids": value.get(
+                        "source_evidence_ids", evidence_ids
+                    ),
+                }
+            )
+        return {
+            **data,
+            "answer": {
+                **answer,
+                "values": updated_values,
+                "conclusions": answer.get("conclusions", []),
+            },
+        }

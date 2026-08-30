@@ -26,7 +26,7 @@ from models import (
     FilingSource,
     TableFragment,
 )
-from utils import normalize_text, unique_strings
+from utils import normalize_label, normalize_text, unique_strings
 
 ITEM_PATTERN = re.compile(r"\bItem\s+(\d+[A-Z]?)\b", re.IGNORECASE)
 NOTE_PATTERN = re.compile(r"\bNote\s+(\d+)\b", re.IGNORECASE)
@@ -378,8 +378,7 @@ def _row_labels(table: TableFragment) -> set[str]:
     labels: set[str] = set()
     for row in table.rows:
         for cell in row:
-            label = re.sub(r"[$%()\d,._—–-]+", " ", cell).casefold()
-            label = normalize_text(label)
+            label = normalize_label(cell)
             if len(label) >= 3:
                 labels.add(label)
                 break

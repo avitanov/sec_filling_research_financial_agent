@@ -185,6 +185,22 @@ def format_observable_timeline(timeline: list[dict[str, Any]]) -> str:
     return "\n\n".join(sections)
 
 
+def count_structured_output_repairs(timeline: list[dict[str, Any]]) -> int:
+    """Count structured-output validation failures that caused another model call.
+
+    Args:
+        timeline: Persisted observable run events.
+
+    Returns:
+        Number of schema-repair cycles.
+    """
+    return sum(
+        "Validation failed for MonolithicAnswer" in json.dumps(event)
+        for event in timeline
+        if event.get("type") == "tool_result"
+    )
+
+
 def _format_timeline_event(
     event: dict[str, Any], tool_calls: dict[str, dict[str, Any]]
 ) -> str:
@@ -261,6 +277,7 @@ def _format_structured_answer(answer: dict[str, Any]) -> str:
         + " | ".join(
             str(value.get(field, "-")) for field in ("label", "value", "unit", "period")
         )
+        + f" | sources: {', '.join(value.get('source_evidence_ids', [])) or '-'}"
         for value in answer.get("values", [])
     ]
     evidence_ids = ", ".join(str(value) for value in answer.get("evidence_ids", []))
@@ -271,6 +288,7 @@ def _format_structured_answer(answer: dict[str, Any]) -> str:
             "Values:",
             *values,
             f"Evidence: {evidence_ids or '-'}",
+            f"Conclusions: {', '.join(answer.get('conclusions', [])) or '-'}",
         ]
     )
 
@@ -327,29 +345,6 @@ def _parse_tool_payload(tool_result: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
-def format_observable_trace(
-    system_prompt: str,
-    tool_definitions: dict[str, Any],
-    messages: list[dict[str, Any]],
-    model_calls: list[ModelCallEvent],
-    retry_events: list[dict[str, Any]],
-) -> str:
-    """Format observable activity when a saved timeline is unavailable.
-
-    This is retained for interactive use. Production runs persist the result of
-    :func:`build_observable_timeline` directly in the run record.
-    """
-    return format_observable_timeline(
-        build_observable_timeline(
-            system_prompt,
-            tool_definitions,
-            messages,
-            model_calls,
-            retry_events,
-        )
-    )
-
-
 def format_run_summary(record: RunRecord, gold_answer: dict[str, Any]) -> str:
     """Format the compact comparison and runtime summary for one run.
 
@@ -382,6 +377,7 @@ def format_run_summary(record: RunRecord, gold_answer: dict[str, Any]) -> str:
         f"Evidence: {', '.join(evidence_ids) or '-'}\n"
         f"Latency: {record.latency_ms} ms | Tokens: {record.token_usage} | "
         f"Retries: {record.retries}\n"
+        f"Structured-output repairs: {record.structured_output_repairs}\n"
         f"Cost: {record.cost_usd or 'not configured'}\n"
         f"Trace: {record.langfuse_trace_url}"
     )
@@ -464,21 +460,3 @@ def propagate_monolithic_attributes(question: QuestionInput) -> Iterator[None]:
         environment=LANGFUSE_TRACING_ENVIRONMENT,
     ):
         yield
-
-
-def fetch_langfuse_observations(trace_id: str) -> list[dict[str, Any]]:
-    """Fetch observations for one completed run to audit instrumentation.
-
-    Args:
-        trace_id: Langfuse trace ID saved in a local run record.
-
-    Returns:
-        Observation dictionaries from Langfuse.
-    """
-    response = get_client().api.observations.get_many(
-        trace_id=trace_id,
-        limit=100,
-        fields="core,basic,model,usage,metrics,trace_context",
-    )
-    data = getattr(response, "data", [])
-    return [item.model_dump(mode="json", by_alias=True) for item in data]

@@ -1,5 +1,6 @@
 """Small reusable utilities."""
 
+import csv
 import json
 import re
 from decimal import Decimal
@@ -7,11 +8,17 @@ from pathlib import Path
 from typing import Any
 
 WHITESPACE_PATTERN = re.compile(r"\s+")
+LABEL_NOISE_PATTERN = re.compile(r"[$%()\d,._—–-]+")
 
 
 def normalize_text(text: str) -> str:
     """Collapse whitespace and strip surrounding space."""
     return WHITESPACE_PATTERN.sub(" ", text).strip()
+
+
+def normalize_label(label: str) -> str:
+    """Normalize a table label for text comparison."""
+    return normalize_text(LABEL_NOISE_PATTERN.sub(" ", label).casefold())
 
 
 def unique_strings(values: list[str | None]) -> list[str]:
@@ -23,6 +30,25 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
     """Read non-empty JSON Lines records from one local file."""
     with path.open(encoding="utf-8") as source:
         return [json.loads(line) for line in source if line.strip()]
+
+
+def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
+    """Write mappings to a UTF-8 CSV file, serializing nested values as JSON."""
+    if not rows:
+        path.write_text("", encoding="utf-8")
+        return
+    with path.open("w", encoding="utf-8", newline="") as output:
+        writer = csv.DictWriter(output, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(
+            {
+                key: json.dumps(value, ensure_ascii=False)
+                if isinstance(value, (list, dict))
+                else value
+                for key, value in row.items()
+            }
+            for row in rows
+        )
 
 
 def format_decimal_result_to_string(value: Decimal) -> str:

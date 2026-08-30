@@ -14,6 +14,7 @@ from agent.data import load_questions
 from agent.observation import (
     build_observable_timeline,
     check_langfuse,
+    count_structured_output_repairs,
     create_trace,
     extract_model_metrics,
     extract_observable_messages,
@@ -33,8 +34,7 @@ from config import (
     BEDROCK_REASONING_MODE,
     MODEL_MAX_RETRIES,
     MODEL_MAX_TOKENS,
-    NOVA_LITE_INPUT_USD_PER_MILLION_TOKENS,
-    NOVA_LITE_OUTPUT_USD_PER_MILLION_TOKENS,
+    MODEL_TOKEN_PRICES,
     OPENROUTER_API_KEY,
     OPENROUTER_BASE_URL,
     OPENROUTER_MODEL,
@@ -48,32 +48,30 @@ from models import MonolithicAnswer, RunRecord
 from retrieval import check_qdrant
 from utils import read_jsonl
 
-SYSTEM_PROMPT = """You are a read-only SEC filing research agent. You specialize in
-finding and interpreting evidence from frozen 10-K filings, selecting normalized
-company facts, and answering factual financial questions with exact calculations.
+SYSTEM_PROMPT = """You are a read-only SEC filing research agent. Use only the
+supplied tools and frozen local data. Do not use outside knowledge, modify data, or
+give financial advice, investment recommendations, predictions, or trade guidance.
 
-Your role is research only. Never provide financial advice, investment
-recommendations, stock-price predictions, or assistance with trades or purchases.
+- Use evidence only for the company in the question. Match its requested period and
+  unit; before calculating, confirm every input has the requested period. Do not
+  guess when evidence is missing or ambiguous.
+- Prefer lookup_fact for normalized facts. Use search_filing when the requested
+  concept, granularity, or context is not available through lookup_fact.
+- Use calculate for every arithmetic step. For growth, calculate (new - old) / old
+  * 100, not new / old * 100. Keep every used calculator operation, exact inputs,
+  and exact result in calculations. Ensure directional wording agrees with results.
+- Ground each reported value in returned evidence or a calculator result. Cite only
+  returned evidence IDs that directly support that value; calculated values cite
+  their input evidence. Put only final requested values in values, and put factual
+  answer claims in conclusions. If the evidence cannot support an answer, say so.
+- Structured values use an absolute plain decimal without commas or symbols, unit
+  USD or percent, and periods such as FY2025 or FY2024 to FY2025. In answer_text,
+  render USD as $1,000,000 without million/billion abbreviations. Round final
+  percentages to two decimal places unless the user requests different precision;
+  retain full precision in calculations and use the same rounded value in prose.
 
-Operating rules:
-- Use only the supplied tools and frozen local data. Do not use outside knowledge,
-  access external sources, or modify data.
-- Use evidence only for the company in the question. Never combine companies.
-- Follow the tool descriptions and use the calculator for every arithmetic step,
-  including intermediate calculations.
-- For normalized consolidated revenue, operating income, net income, total assets,
-  and operating cash flow, use lookup_fact first. Use search_filing for values or
-  context that are not available as normalized facts, such as segment disclosures.
-- Select evidence that matches the requested period and unit. Do not silently choose
-  between ambiguous or conflicting facts.
-- Ground every reported number in retrieved evidence or a calculator result. Include
-  only evidence IDs actually returned by the tools.
-- Preserve exact values, periods, units, evidence IDs, and calculator operations,
-  inputs, and results in the structured output.
-- If the available evidence cannot support an answer, say so instead of guessing or
-  introducing unsupported numbers.
-- Keep the answer concise. Return only the requested structured output and never
-  include hidden reasoning.
+Return only the requested structured output. Keep the answer concise and do not
+include hidden reasoning.
 """
 
 
@@ -149,24 +147,22 @@ def _failure_category(error: Exception) -> str:
     return "agent_error"
 
 
-def _nova_lite_cost(
-    model_id: str, token_usage: dict[str, int]
+def _model_cost(
+    token_usage: dict[str, int],
+    input_usd_per_million_tokens: Decimal | None,
+    output_usd_per_million_tokens: Decimal | None,
 ) -> tuple[dict[str, str], dict[str, str]]:
-    """Calculate Nova Lite on-demand input and output charges when applicable."""
-    if model_id != BEDROCK_NOVA_LITE_MODEL_ID:
+    """Calculate token cost when prices are configured for a model."""
+    if input_usd_per_million_tokens is None or output_usd_per_million_tokens is None:
         return {}, {}
     input_tokens = Decimal(token_usage.get("inputTokens", 0))
     output_tokens = Decimal(token_usage.get("outputTokens", 0))
-    input_cost = (
-        input_tokens * NOVA_LITE_INPUT_USD_PER_MILLION_TOKENS / Decimal("1000000")
-    )
-    output_cost = (
-        output_tokens * NOVA_LITE_OUTPUT_USD_PER_MILLION_TOKENS / Decimal("1000000")
-    )
+    input_cost = input_tokens * input_usd_per_million_tokens / Decimal("1000000")
+    output_cost = output_tokens * output_usd_per_million_tokens / Decimal("1000000")
     return (
         {
-            "input": str(NOVA_LITE_INPUT_USD_PER_MILLION_TOKENS),
-            "output": str(NOVA_LITE_OUTPUT_USD_PER_MILLION_TOKENS),
+            "input": str(input_usd_per_million_tokens),
+            "output": str(output_usd_per_million_tokens),
         },
         {
             "input": str(input_cost),
@@ -319,7 +315,16 @@ class MonolithicAgentHarness:
         token_usage, model_calls = extract_model_metrics(
             self.agent.event_loop_metrics.get_summary(), self.model_id
         )
-        pricing, cost = _nova_lite_cost(self.model_id, token_usage)
+        pricing, cost = _model_cost(
+            token_usage, *MODEL_TOKEN_PRICES.get(self.model_id, (None, None))
+        )
+        observable_timeline = build_observable_timeline(
+            SYSTEM_PROMPT,
+            self.agent.tool_registry.get_all_tools_config(),
+            extract_observable_messages(self.agent.messages),
+            model_calls,
+            self.retry_tracking.events,
+        )
         record = RunRecord(
             run_id=run_id,
             started_at=started_at.isoformat(),
@@ -331,13 +336,7 @@ class MonolithicAgentHarness:
             answer=answer,
             model_calls=model_calls,
             tool_events=self.tools.get_events(),
-            observable_timeline=build_observable_timeline(
-                SYSTEM_PROMPT,
-                self.agent.tool_registry.get_all_tools_config(),
-                extract_observable_messages(self.agent.messages),
-                model_calls,
-                self.retry_tracking.events,
-            ),
+            observable_timeline=observable_timeline,
             retry_events=list(self.retry_tracking.events),
             failure_category=failure_category,
             failure_message=failure_message,
@@ -346,6 +345,9 @@ class MonolithicAgentHarness:
             cost_usd=cost,
             latency_ms=round((perf_counter() - timer) * 1000, 2),
             retries=self.retry_tracking.count,
+            structured_output_repairs=count_structured_output_repairs(
+                observable_timeline
+            ),
             langfuse_trace_id=trace_id,
             langfuse_trace_url=trace_url,
         )
@@ -368,30 +370,17 @@ class MonolithicAgentHarness:
             for record in read_jsonl(self.run_records_path)
         ]
 
-    def run_batch(
-        self,
-        ticker: str,
-        *,
-        skip_completed: bool = True,
-    ) -> list[RunRecord]:
+    def run_batch(self, ticker: str) -> list[RunRecord]:
         """Run one company's questions sequentially with the configured agent.
 
         Args:
             ticker: Frozen benchmark company ticker.
-            skip_completed: Skip question IDs with a saved successful run.
 
         Returns:
-            New run records created by this call.
+            Run records created by this call.
         """
-        completed = {
-            record.question.question_id
-            for record in self.load_records()
-            if record.status == "success"
-        }
         records: list[RunRecord] = []
         for question in load_questions(ticker):
-            if skip_completed and question.question_id in completed:
-                continue
             record = self.run_question(question.question)
             records.append(record)
             if record.failure_category in {

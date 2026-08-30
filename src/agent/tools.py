@@ -13,6 +13,29 @@ from models import ToolEvent
 from retrieval import search_filing as search_filing_records
 from utils import format_decimal_result_to_string
 
+FACT_RESULT_FIELDS = (
+    "company",
+    "ticker",
+    "concept",
+    "evidence_id",
+    "value",
+    "unit",
+    "period",
+)
+SEARCH_METADATA_FIELDS = (
+    "evidence_type",
+    "report_year",
+    "printed_page",
+    "section_title",
+    "table_periods",
+    "table_units",
+    "supporting_page_ids",
+)
+
+
+def _selected_fields(record: dict[str, Any], fields: tuple[str, ...]) -> dict[str, Any]:
+    return {field: record[field] for field in fields if record.get(field) is not None}
+
 
 class ProjectTools:
     """Provide bounded SEC retrieval, fact lookup, and arithmetic tools."""
@@ -76,7 +99,9 @@ class ProjectTools:
                         "evidence_id": record.evidence_id,
                         "score": record.score,
                         "text": record.text,
-                        "metadata": record.metadata,
+                        "metadata": _selected_fields(
+                            record.metadata, SEARCH_METADATA_FIELDS
+                        ),
                     }
                     for record in records
                 ],
@@ -112,8 +137,7 @@ class ProjectTools:
 
         Args:
             company: Company ticker. It must match the question company.
-            concept: One of revenue, operating_income, net_income, total_assets,
-                or operating_cash_flow.
+            concept: One normalized concept. Revenue means consolidated net sales.
 
         Returns:
             All matching frozen facts, or an explicit missing result.
@@ -129,7 +153,12 @@ class ProjectTools:
             ]
             if len(matches) == 0:
                 raise ValueError("No matching frozen facts")
-            result = {"status": "ok", "facts": matches}
+            result = {
+                "status": "ok",
+                "facts": [
+                    _selected_fields(fact, FACT_RESULT_FIELDS) for fact in matches
+                ],
+            }
             evidence_ids = [str(fact["evidence_id"]) for fact in matches]
             self._record(
                 "lookup_fact", arguments, started_at, result, evidence_ids=evidence_ids
