@@ -14,9 +14,10 @@ from agent.plugins import RetryTrackingPlugin
 from agent.providers import build_model
 from config import (
     AWS_REGION,
-    BEDROCK_MANTLE_TIMEOUT_SECONDS,
     EVALUATION_JUDGE_MAX_TOKENS,
     EVALUATION_JUDGE_MODEL_ID,
+    EVALUATION_JUDGE_THINKING_BUDGET_TOKENS,
+    EVALUATION_JUDGE_TIMEOUT_SECONDS,
     MODEL_MAX_RETRIES,
 )
 from model_usage import handle_model_invocation
@@ -65,13 +66,23 @@ output.
 
 
 def _build_judge_model() -> Model:
+    if EVALUATION_JUDGE_THINKING_BUDGET_TOKENS >= EVALUATION_JUDGE_MAX_TOKENS:
+        raise ValueError("Judge thinking budget must be below its maximum tokens")
     return build_model(
         provider="bedrock",
         model_id=EVALUATION_JUDGE_MODEL_ID,
         region_name=AWS_REGION,
-        timeout_seconds=BEDROCK_MANTLE_TIMEOUT_SECONDS,
+        timeout_seconds=EVALUATION_JUDGE_TIMEOUT_SECONDS,
         max_tokens=EVALUATION_JUDGE_MAX_TOKENS,
-        temperature=0,
+        temperature=None,
+        model_parameters={
+            "additional_request_fields": {
+                "thinking": {
+                    "type": "enabled",
+                    "budget_tokens": EVALUATION_JUDGE_THINKING_BUDGET_TOKENS,
+                }
+            }
+        },
     )
 
 

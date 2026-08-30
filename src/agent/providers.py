@@ -15,7 +15,7 @@ def build_model(
     timeout_seconds: int,
     max_tokens: int,
     *,
-    temperature: float = 0,
+    temperature: float | None = 0,
     client_max_retries: int = 0,
     model_parameters: dict[str, Any] | None = None,
     api_key: str | None = None,
@@ -52,7 +52,8 @@ def build_model(
         raise ValueError("client_max_retries cannot be negative")
 
     params = dict(model_parameters or {})
-    params["temperature"] = temperature
+    if temperature is not None:
+        params["temperature"] = temperature
     params["max_tokens"] = max_tokens
     if provider == "openrouter":
         if not api_key or not base_url:
