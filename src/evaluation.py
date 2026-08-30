@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import date
+from datetime import UTC, datetime
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from pathlib import Path
 from statistics import median
@@ -779,7 +779,7 @@ def save_evaluation_results(
     judge_rows: list[dict[str, Any]] | None = None,
     results_root: Path | None = None,
 ) -> Path:
-    """Save one batch and its deterministic metrics in a dated folder.
+    """Save one batch and its deterministic metrics in a timestamped folder.
 
     Args:
         generated_records: Complete agent run records from one batch.
@@ -811,8 +811,9 @@ def save_evaluation_results(
     model_slug = re.sub(r"[^a-z0-9]+", "-", next(iter(models)).lower()).strip("-")
     architecture = next(iter(architectures))
     ticker = next(iter(tickers)).upper()
+    timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H%M%S%fZ")
     destination = (results_root or PROJECT_ROOT / "results") / (
-        f"{date.today().isoformat()}-{architecture}-{model_slug}-{ticker}"
+        f"{timestamp}-{architecture}-{model_slug}-{ticker}"
     )
     destination.mkdir(parents=True, exist_ok=True)
     with (destination / "runs.jsonl").open("w", encoding="utf-8") as output:
