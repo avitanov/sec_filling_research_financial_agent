@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import UTC, datetime
+from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -92,7 +92,7 @@ def handle_model_invocation(
         usage["usd_spent_input"] = str(total_input)
         usage["usd_spent_output"] = str(total_output)
         usage["usd_spent_total"] = str(total_input + total_output)
-    usage["updated_at"] = datetime.now(UTC).isoformat()
+    usage["updated_at"] = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(usage, indent=2) + "\n", encoding="utf-8")
