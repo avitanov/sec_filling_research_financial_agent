@@ -3,7 +3,9 @@
 import re
 from dataclasses import asdict, dataclass, field
 from html.parser import HTMLParser
-from typing import Any
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from utils import compact_metadata, normalize_text
 
@@ -323,3 +325,173 @@ class FilingSearchResult:
     score: float
     text: str
     metadata: dict[str, Any]
+
+
+class QuestionInput(BaseModel):
+    """Store only the benchmark fields safe to expose during a run."""
+
+    question_id: str
+    split: str
+    ticker: str
+    company: str
+    category: str
+    question: str
+
+
+class AnswerValue(BaseModel):
+    """Represent one value stated in the final answer."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    label: str = Field(description="Short name of the reported financial value.")
+    value: str = Field(
+        description=(
+            "Plain decimal without commas, currency symbols, percent signs, or "
+            "magnitude words. USD uses absolute digits; percentages use exactly "
+            "two decimal places unless the question requests another precision."
+        )
+    )
+    unit: str | None = Field(description="Required unit: use USD or percent.")
+    period: str | None = Field(
+        description="Required fiscal period such as FY2025 or FY2024 to FY2025."
+    )
+    source_evidence_ids: list[str] = Field(
+        description=(
+            "Only evidence IDs returned by lookup_fact or search_filing. For a "
+            "calculated value, list the evidence IDs for its source inputs; never "
+            "invent a calculation ID."
+        )
+    )
+
+
+class CalculationRecord(BaseModel):
+    """Represent one calculation reported by the agent."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    operation: Literal["add", "subtract", "divide", "percentage"]
+    inputs: list[str] = Field(
+        description="Exact plain-decimal inputs sent to the calculate tool."
+    )
+    result: str = Field(
+        description="Exact plain-decimal result returned by the calculate tool."
+    )
+
+
+class MonolithicAnswer(BaseModel):
+    """Define the structured output returned by the monolithic agent."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    answer_text: str
+    values: list[AnswerValue] = Field(
+        description=(
+            "Only final values requested by the question. Do not repeat raw source "
+            "inputs or intermediate calculator values here."
+        )
+    )
+    evidence_ids: list[str] = Field(
+        description="All cited evidence IDs actually returned by retrieval tools."
+    )
+    calculations: list[CalculationRecord]
+    conclusions: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Short factual conclusions stated in answer_text, or an empty list."
+        ),
+    )
+
+
+class ToolEvent(BaseModel):
+    """Record one canonical project-tool invocation."""
+
+    sequence: int
+    name: Literal["search_filing", "lookup_fact", "calculate"]
+    arguments: dict[str, Any]
+    success: bool
+    result: Any = None
+    error: str | None = None
+    evidence_ids: list[str] = Field(default_factory=list)
+    latency_ms: float
+
+
+class ModelCallEvent(BaseModel):
+    """Record token usage reported for one agent model cycle."""
+
+    sequence: int
+    model: str
+    token_usage: dict[str, int] = Field(default_factory=dict)
+
+
+class JudgeScores(BaseModel):
+    """Store qualitative evaluation scores returned by the LLM judge."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    llm_answer_correctness_grade: int = Field(ge=1, le=5)
+    workflow_correctness: int = Field(ge=1, le=5)
+    chronological_coherence: int = Field(ge=1, le=5)
+    workflow_efficiency: int = Field(ge=1, le=5)
+    auditability: int = Field(ge=1, le=5)
+    explanation: str
+
+
+class RunRecord(BaseModel):
+    """Store the complete observable record for one monolithic run."""
+
+    run_id: str
+    started_at: str
+    question: QuestionInput
+    architecture: Literal["monolithic"] = "monolithic"
+    provider: Literal["openrouter", "bedrock"]
+    model: str
+    reasoning_mode: str
+    status: Literal["success", "failure"]
+    answer: MonolithicAnswer | None = None
+    model_calls: list[ModelCallEvent] = Field(default_factory=list)
+    tool_events: list[ToolEvent] = Field(default_factory=list)
+    observable_timeline: list[dict[str, Any]] = Field(default_factory=list)
+    retry_events: list[dict[str, Any]] = Field(default_factory=list)
+    failure_category: str | None = None
+    failure_message: str | None = None
+    token_usage: dict[str, int] = Field(default_factory=dict)
+    pricing_usd_per_million_tokens: dict[str, str] = Field(default_factory=dict)
+    cost_usd: dict[str, str] = Field(default_factory=dict)
+    latency_ms: float
+    retries: int = 0
+    structured_output_repairs: int = 0
+    langfuse_trace_id: str | None = None
+    langfuse_trace_url: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _default_legacy_answer_fields(cls, data: Any) -> Any:
+        """Fill fields absent from persisted runs created before audit upgrades."""
+        if not isinstance(data, dict) or not isinstance(data.get("answer"), dict):
+            return data
+        answer = data["answer"]
+        values = answer.get("values")
+        if not isinstance(values, list):
+            return data
+        evidence_ids = answer.get("evidence_ids", [])
+        updated_values = []
+        for value in values:
+            if not isinstance(value, dict):
+                updated_values.append(value)
+                continue
+            updated_values.append(
+                {
+                    **value,
+                    "source_evidence_ids": value.get(
+                        "source_evidence_ids", evidence_ids
+                    ),
+                }
+            )
+        return {
+            **data,
+            "answer": {
+                **answer,
+                "values": updated_values,
+                "conclusions": answer.get("conclusions", []),
+            },
+        }

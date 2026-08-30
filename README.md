@@ -1,7 +1,7 @@
 # Auditable SEC Filing Research
 
 This MVP compares a monolithic filing-research agent with a verification-first
-pipeline using the same frozen SEC evidence. This PR provides the reproducible
+pipeline using the same frozen SEC evidence. This project includes the reproducible
 parsing, chunking, embedding, and retrieval foundation for that comparison.
 
 ## Setup
@@ -18,7 +18,7 @@ cp .env.example .env
 ```
 
 Run all commands below from the repository root. Project Python commands use
-`uv run`; no manual `PYTHONPATH` configuration is required.
+`uv run`.
 
 ## SEC data collection
 
@@ -170,10 +170,12 @@ curl -s -X POST \
 
 The main files are:
 
-- `src/chunking.py`: source validation, HTML parsing, overlap, and synthetic
-  table chunks;
-- `src/embeddings.py`: exact token counting and dense embedding;
-- `src/retrieval.py`: Qdrant indexing, validation, and hybrid search;
+- `src/retrieval/chunking.py`: source validation, HTML parsing, overlap, and
+  synthetic table chunks;
+- `src/retrieval/embeddings.py`: exact token counting and dense embedding;
+- `src/retrieval/`: Qdrant indexing, validation, and hybrid search;
+- `src/models.py` and `src/exceptions.py`: shared records and explicit failures;
+- `src/agent/`: Phase 1 tools, run records, and monolithic orchestration;
 - `scripts/index_filings.py`: command-line entry point.
 
 The chunk token audit notebook at
@@ -202,11 +204,83 @@ company-specific train, validation, and held-out test directories. Every
 selected observation is limited to the frozen 10-K accession and cross-checked
 against inline XBRL in the corresponding filing.
 
+## Phase 1 monolithic agent
+
+Phase 1 implements the monolithic baseline. One reusable Strands agent receives
+each frozen question, uses `search_filing`, `lookup_fact`, and `calculate`, and
+returns both human-readable `answer_text` and an auditable structured answer.
+Gold answers and scoring metadata are never included in the prompt.
+
+Development dry runs use Amazon Bedrock's `amazon.nova-lite-v1:0` model. The
+agent records provider-reported token usage. Reasoning content is never saved
+in local records or Langfuse.
+
+```dotenv
+AWS_REGION="<your-aws-region>"
+AWS_PROFILE="<your-aws-profile>"
+BEDROCK_NOVA_LITE_MODEL_ID="amazon.nova-lite-v1:0"
+BEDROCK_REASONING_MODE="none"
+EVALUATION_JUDGE_MODEL_ID="us.anthropic.claude-haiku-4-5-20251001-v1:0"
+EVALUATION_JUDGE_MAX_TOKENS="5000"
+EVALUATION_JUDGE_THINKING_BUDGET_TOKENS="1024"
+EVALUATION_JUDGE_TIMEOUT_SECONDS="120"
+```
+
+Add the three `LANGFUSE_*` credentials shown in `.env.example`. Start Qdrant
+and build the filing index as described above. Authenticate the configured AWS
+profile, then open and run
+[`notebooks/02_monolithic_bedrock_dry_runs.ipynb`](notebooks/02_monolithic_bedrock_dry_runs.ipynb)
+from top to bottom.
+
+The notebook performs the external-service preflight, shows observable traces
+for four representative AMZN questions, runs and evaluates all 16 AMZN
+development questions, then runs the same process for the 16 GOOGL validation
+questions. It keeps development and validation outputs separate.
+
+Each attempted inference is appended immediately to the ignored local file
+`data/runs/monolithic_bedrock.jsonl`. These JSONL records—not Langfuse—are
+the official experiment source. They include observable tool events, evidence
+IDs, structured output, failure category, token usage when available, latency,
+retry count, cost, and the Langfuse trace link. Hidden chain-of-thought is not
+stored.
+
+Each batch is also evaluated by a reusable Haiku 4.5 judge with Bedrock extended
+thinking. It assigns 1–5 grades for final-answer correctness, workflow
+correctness, chronological coherence, efficiency, and auditability. Deterministic
+numerical correctness remains strict and is never overridden by judge grades.
+
+Each saved batch gets its own timestamped `results/` folder containing run JSONL,
+judge JSONL, the JSON summary, and per-question/retrieval CSV metrics. Cumulative
+per-model tokens and input/output cost are tracked in the committed
+`results/model_usage/<model>/usage.json` files.
+
+The rationale and changes to deterministic and judged metrics are documented in
+[`docs/evaluation.md`](docs/evaluation.md).
+
+Run the deterministic checks with:
+
+```bash
+uv run pytest
+```
+
+OpenRouter remains an optional alternative for users without AWS access. To use
+it, pass `provider="openrouter"` and configure its variables in `.env`. Ping
+that optional model separately with:
+
+```bash
+uv run python tests/smoke_test_openrouter.py
+```
+
+The required verification-first system and Bedrock experiment remain separate
+later phases. The required verifier will be deterministic Python, as specified
+in `AGENTS.md`; Langfuse remains observability support only.
+
 ## Bedrock smoke tests
 
-The smoke test calls Haiku through the Bedrock Runtime Converse API and Luna
-through the Bedrock Mantle Responses API. Configure an AWS profile with access
-to the required models, then add its name and region to `.env`:
+The smoke test calls the current Nova Lite dry-run model and also supports the
+later Haiku experiment through the Bedrock Runtime Converse API. Luna uses the
+Bedrock Mantle Responses API. Configure an AWS profile with access to the
+required models, then add its name and region to `.env`:
 
 ```dotenv
 AWS_PROFILE="<your-aws-profile>"
@@ -224,8 +298,9 @@ An active cached session can be reused until it expires. Run the selected model
 check directly with uv:
 
 ```bash
-uv run python tests/smoke_test_model.py --model haiku
-uv run python tests/smoke_test_model.py --model luna
+uv run python tests/smoke_test_aws_model.py --model nova-lite
+uv run python tests/smoke_test_aws_model.py --model haiku
+uv run python tests/smoke_test_aws_model.py --model luna
 ```
 
 The smoke test sends one short `2 + 2` request to the selected model and prints

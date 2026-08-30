@@ -42,20 +42,72 @@ deterministic evaluation are:
   Exact Match, Invocation, and Conditional Execution metrics. It intentionally
   does not prescribe call order or the number of calls;
 - `gold_evidence_ids`: minimum fact and filing records needed to support the
-  answer and calculation audit trail;
-- `gold_retrieval_evidence_ids`: canonical filing chunks used for Evidence
-  Recall@5;
-- `relevant_retrieval_evidence_ids`: all accepted relevant filing chunks used
-  to calculate Irrelevant Retrieval Rate@5 without marking an equivalent page
-  and table representation as irrelevant;
+  answer and calculation audit trail. Filing IDs in this list are also the
+  required targets for Evidence Recall@5;
+- `alternative_retrieval_evidence_ids`: additional filing chunks accepted as
+  relevant for Irrelevant Retrieval Rate@5, such as a page containing the
+  required table;
 - `gold_numeric_inputs`: filing-derived values, periods, units, and evidence
   links used when a calculation depends on a value that is not in normalized
   Company Facts;
 - `gold_calculations`: the expected operation graph and intermediate results.
 
-The retrieval fields appear only on the four questions per company that require
-`search_filing`. Runtime-only metrics—success, failure category, latency,
-tokens, retries, and cost—come from saved run records rather than gold data.
+Every question record has the same top-level fields. Alternative retrieval IDs
+and filing-derived numeric inputs use `[]` when they do not apply. Runtime-only
+metrics—success, failure category, latency, tokens, retries, and cost—come from
+saved run records rather than gold data.
+
+## Question record schema
+
+| Attribute | Purpose | Used by evaluation |
+|---|---|---|
+| `question_id` | Stable identifier such as `amzn-12`. | Matches a saved run to its gold record. |
+| `question` | Natural-language question sent to the agent. | Identifies the task being evaluated. |
+| `ticker` | Company ticker (`AMZN`, `GOOGL`, or `KO`). | Loads the company facts and matches the run company. |
+| `company` | Full company name. | Describes the target company and is included in the runtime question. |
+| `category` | `direct_extraction`, `single_formula`, `period_comparison`, or `multi_step`. | Produces per-category metric summaries. |
+| `split` | `development`, `validation`, or `held_out`. | Keeps experiment partitions separate. |
+| `required_tools` | Minimum tool names needed for the question. | Computes tool precision, recall, F1, exact match, invocation, and execution metrics. |
+| `answer` | Gold answer shape and expected values. | Computes numerical and formatting correctness. |
+| `gold_evidence_ids` | Facts and filing records required to support the answer. | Computes evidence validity, completeness, auditability, and required retrieval targets. |
+| `alternative_retrieval_evidence_ids` | Additional filing IDs accepted as relevant, such as a parent page for a required table. | Prevents equivalent retrieval results from being counted as irrelevant. |
+| `gold_numeric_inputs` | Exact manually verified values from filing tables that are absent from Company Facts. | Resolves filing-specific calculation inputs and validates supported values. |
+| `gold_calculations` | Expected calculation operations, inputs, and results. | Computes formula correctness and verifies the calculation audit trail. |
+| `gold_filing_pages` | Printed filing pages containing the source information. | Human review and provenance; not used directly in metric formulas. |
+| `gold_filing_statements` | Filing statements or sections containing the source information. | Human review and provenance; not used directly in metric formulas. |
+
+### Nested `answer` fields
+
+| Attribute | Purpose |
+|---|---|
+| `response_type` | Defines the answer shape: `number`, `labeled_number`, or `paragraph`. |
+| `value` | Expected numeric result for a scalar answer. |
+| `unit` | Expected unit, normally `USD` or `percent`. |
+| `rounding` | Documents the intended gold precision. |
+| `label` | Name of a labeled value, such as `AWS`. |
+| `required_values` | Expected numeric values for a paragraph answer. |
+| `required_claims` | Expected factual conclusions for a paragraph answer. |
+
+### Nested `gold_numeric_inputs` fields
+
+| Attribute | Purpose |
+|---|---|
+| `evidence_id` | Filing evidence record containing the value. |
+| `input_id` | Identifier referenced by a gold calculation. |
+| `label` | Human-readable input name. |
+| `period` | Fiscal period of the input. |
+| `unit` | Unit of the input. |
+| `value` | Exact frozen numeric value. |
+
+### Nested `gold_calculations` fields
+
+| Attribute | Purpose |
+|---|---|
+| `calculation_id` | Stable identifier for one calculation step. |
+| `input_refs` | Fact or previous-calculation IDs used as inputs. |
+| `constant_inputs` | Direct numeric constants such as `3` when averaging three years. |
+| `operation` | Allowed operation, such as `add`, `subtract`, `divide`, or `percentage`. |
+| `result` | Expected result of that calculation step. |
 
 The `answer.response_type` field defines the scoring shape:
 

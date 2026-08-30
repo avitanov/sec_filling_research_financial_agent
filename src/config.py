@@ -1,6 +1,7 @@
 """Application configuration for SEC data collection."""
 
 import os
+from decimal import Decimal
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -12,6 +13,7 @@ RAW_DATA_DIR = PROJECT_ROOT / "data" / "raw"
 MANIFEST_PATH = PROJECT_ROOT / "data" / "manifest.csv"
 EVALUATION_DATA_DIR = PROJECT_ROOT / "data" / "evaluation"
 RUNS_DIR = PROJECT_ROOT / "data" / "runs"
+MODEL_USAGE_DIR = PROJECT_ROOT / "results" / "model_usage"
 COMPANY_TICKERS_PATH = PROJECT_ROOT / "data" / "company_tickers.json"
 DEFAULT_COMPANIES: tuple[str, ...] = ("KO", "GOOGL", "AMZN")
 DEFAULT_REPORT_YEAR = 2025
@@ -24,29 +26,96 @@ SEC_REQUEST_TIMEOUT_SECONDS = 30
 SEC_USER_AGENT = os.getenv("SEC_USER_AGENT", "").strip()
 
 AWS_REGION = os.getenv("AWS_REGION", "us-east-1").strip()
+BEDROCK_NOVA_LITE_MODEL_ID = os.getenv(
+    "BEDROCK_NOVA_LITE_MODEL_ID", "amazon.nova-lite-v1:0"
+).strip()
+# Amazon Bedrock on-demand text pricing in us-east-1, verified 2026-08-24.
+NOVA_LITE_INPUT_USD_PER_MILLION_TOKENS = Decimal("0.06")
+NOVA_LITE_OUTPUT_USD_PER_MILLION_TOKENS = Decimal("0.24")
+BEDROCK_SONNET_MODEL_ID = os.getenv(
+    "BEDROCK_SONNET_MODEL_ID",
+    "us.anthropic.claude-sonnet-4-5-20251001-v1:0",
+).strip()
+# Anthropic Claude Sonnet standard on-demand text pricing in us-east-1,
+# verified 2026-08-30.
+SONNET_INPUT_USD_PER_MILLION_TOKENS = Decimal("3.00")
+SONNET_OUTPUT_USD_PER_MILLION_TOKENS = Decimal("15.00")
 BEDROCK_HAIKU_MODEL_ID = os.getenv(
     "BEDROCK_HAIKU_MODEL_ID",
     "us.anthropic.claude-haiku-4-5-20251001-v1:0",
 ).strip()
+# Anthropic Claude Haiku 4.5 standard on-demand text pricing in us-east-1,
+# verified 2026-08-28.
+HAIKU_INPUT_USD_PER_MILLION_TOKENS = Decimal("1.10")
+HAIKU_OUTPUT_USD_PER_MILLION_TOKENS = Decimal("5.50")
+MODEL_TOKEN_PRICES: dict[str, tuple[Decimal, Decimal]] = {
+    BEDROCK_NOVA_LITE_MODEL_ID: (
+        NOVA_LITE_INPUT_USD_PER_MILLION_TOKENS,
+        NOVA_LITE_OUTPUT_USD_PER_MILLION_TOKENS,
+    ),
+    BEDROCK_SONNET_MODEL_ID: (
+        SONNET_INPUT_USD_PER_MILLION_TOKENS,
+        SONNET_OUTPUT_USD_PER_MILLION_TOKENS,
+    ),
+    BEDROCK_HAIKU_MODEL_ID: (
+        HAIKU_INPUT_USD_PER_MILLION_TOKENS,
+        HAIKU_OUTPUT_USD_PER_MILLION_TOKENS,
+    ),
+}
+EVALUATION_JUDGE_MODEL_ID = os.getenv(
+    "EVALUATION_JUDGE_MODEL_ID", BEDROCK_HAIKU_MODEL_ID
+).strip()
+EVALUATION_JUDGE_MAX_TOKENS = int(os.getenv("EVALUATION_JUDGE_MAX_TOKENS", "5000"))
+EVALUATION_JUDGE_THINKING_BUDGET_TOKENS = int(
+    os.getenv("EVALUATION_JUDGE_THINKING_BUDGET_TOKENS", "1024")
+)
+EVALUATION_JUDGE_TIMEOUT_SECONDS = int(
+    os.getenv("EVALUATION_JUDGE_TIMEOUT_SECONDS", "120")
+)
 BEDROCK_LUNA_MODEL_ID = os.getenv(
     "BEDROCK_LUNA_MODEL_ID", "openai.gpt-5.6-luna"
 ).strip()
+# GPT-5.6 Luna standard short-context in-region pricing in us-east-1,
+# verified 2026-08-30.
+LUNA_INPUT_USD_PER_MILLION_TOKENS = Decimal("0.22")
+LUNA_OUTPUT_USD_PER_MILLION_TOKENS = Decimal("1.32")
+MODEL_TOKEN_PRICES[BEDROCK_LUNA_MODEL_ID] = (
+    LUNA_INPUT_USD_PER_MILLION_TOKENS,
+    LUNA_OUTPUT_USD_PER_MILLION_TOKENS,
+)
+BEDROCK_REASONING_MODE = os.getenv("BEDROCK_REASONING_MODE", "none").strip()
 BEDROCK_MANTLE_TIMEOUT_SECONDS = int(os.getenv("BEDROCK_MANTLE_TIMEOUT_SECONDS", "30"))
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
-OPENROUTER_MODEL = os.getenv(
-    "OPENROUTER_MODEL", "z-ai/glm-5.2:free"
-).strip()
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "openai/gpt-oss-20b").strip()
+OPENROUTER_PROVIDER = os.getenv("OPENROUTER_PROVIDER", "coreweave").strip()
+OPENROUTER_REASONING_EFFORT = os.getenv("OPENROUTER_REASONING_EFFORT", "low").strip()
 OPENROUTER_BASE_URL = os.getenv(
     "OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"
 ).strip()
 OPENROUTER_TIMEOUT_SECONDS = 60
-OPENROUTER_MAX_RETRIES = 1
-OPENROUTER_MAX_TOKENS = 4096
-AGENT_MAX_TOOL_CALLS = 20
+# OpenRouter standard model pricing, verified 2026-08-30.
+OPENROUTER_GPT_OSS_20B_MODEL_ID = "openai/gpt-oss-20b"
+GPT_OSS_20B_INPUT_USD_PER_MILLION_TOKENS = Decimal("0.03")
+GPT_OSS_20B_OUTPUT_USD_PER_MILLION_TOKENS = Decimal("0.13")
+OPENROUTER_GLM_5_2_FREE_MODEL_ID = "z-ai/glm-5.2:free"
+MODEL_TOKEN_PRICES[OPENROUTER_GPT_OSS_20B_MODEL_ID] = (
+    GPT_OSS_20B_INPUT_USD_PER_MILLION_TOKENS,
+    GPT_OSS_20B_OUTPUT_USD_PER_MILLION_TOKENS,
+)
+MODEL_TOKEN_PRICES[OPENROUTER_GLM_5_2_FREE_MODEL_ID] = (Decimal("0"), Decimal("0"))
+MODEL_MAX_RETRIES = 2
+MODEL_MAX_TOKENS = 4096
 AGENT_MAX_TURNS = 12
 AGENT_MAX_OUTPUT_TOKENS = 12_000
 AGENT_MAX_TOTAL_TOKENS = 80_000
+
+LANGFUSE_PUBLIC_KEY = os.getenv("LANGFUSE_PUBLIC_KEY", "").strip()
+LANGFUSE_SECRET_KEY = os.getenv("LANGFUSE_SECRET_KEY", "").strip()
+LANGFUSE_BASE_URL = os.getenv("LANGFUSE_BASE_URL", "").strip()
+LANGFUSE_TRACING_ENVIRONMENT = os.getenv(
+    "LANGFUSE_TRACING_ENVIRONMENT", "development"
+).strip()
 
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333").strip()
 QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "sec_filing_chunks_v1").strip()

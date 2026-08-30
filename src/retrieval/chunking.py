@@ -5,6 +5,7 @@ import hashlib
 import re
 import warnings
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -25,7 +26,7 @@ from models import (
     FilingSource,
     TableFragment,
 )
-from utils import normalize_text, unique_strings
+from utils import normalize_label, normalize_text, unique_strings
 
 ITEM_PATTERN = re.compile(r"\bItem\s+(\d+[A-Z]?)\b", re.IGNORECASE)
 NOTE_PATTERN = re.compile(r"\bNote\s+(\d+)\b", re.IGNORECASE)
@@ -62,7 +63,10 @@ def _page_id(ticker: str, report_year: int, sequence: int) -> str:
     return f"filing-{ticker.lower()}-{report_year}-page-{sequence:04d}"
 
 
-def load_filing_sources(manifest_path: Path = MANIFEST_PATH) -> list[FilingSource]:
+@lru_cache(maxsize=None)
+def load_filing_sources(
+    manifest_path: Path = MANIFEST_PATH,
+) -> tuple[FilingSource, ...]:
     """Load frozen 10-K sources from the repository manifest.
 
     Args:
@@ -91,7 +95,7 @@ def load_filing_sources(manifest_path: Path = MANIFEST_PATH) -> list[FilingSourc
                     sha256=row["sha256"],
                 )
             )
-    return sorted(sources, key=lambda source: source.ticker)
+    return tuple(sorted(sources, key=lambda source: source.ticker))
 
 
 def parse_filing_pages(source: FilingSource) -> list[FilingPage]:
@@ -374,8 +378,7 @@ def _row_labels(table: TableFragment) -> set[str]:
     labels: set[str] = set()
     for row in table.rows:
         for cell in row:
-            label = re.sub(r"[$%()\d,._—–-]+", " ", cell).casefold()
-            label = normalize_text(label)
+            label = normalize_label(cell)
             if len(label) >= 3:
                 labels.add(label)
                 break
