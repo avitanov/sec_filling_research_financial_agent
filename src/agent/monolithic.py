@@ -44,6 +44,7 @@ from config import (
     QDRANT_COLLECTION,
     RUNS_DIR,
 )
+from model_usage import handle_model_invocation
 from models import MonolithicAnswer, RunRecord
 from retrieval import check_qdrant
 from utils import read_jsonl
@@ -315,6 +316,11 @@ class MonolithicAgentHarness:
         token_usage, model_calls = extract_model_metrics(
             self.agent.event_loop_metrics.get_summary(), self.model_id
         )
+        call_usages = [model_call.token_usage for model_call in model_calls]
+        if not call_usages and token_usage:
+            call_usages = [token_usage]
+        for call_usage in call_usages:
+            handle_model_invocation(self.model_id, call_usage)
         pricing, cost = _model_cost(
             token_usage, *MODEL_TOKEN_PRICES.get(self.model_id, (None, None))
         )

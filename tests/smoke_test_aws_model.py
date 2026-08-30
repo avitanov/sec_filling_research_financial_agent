@@ -32,6 +32,7 @@ from config import (  # noqa: E402
     BEDROCK_NOVA_LITE_MODEL_ID,
     BEDROCK_SONNET_MODEL_ID,
 )
+from model_usage import handle_model_invocation  # noqa: E402
 
 
 def _signed_post(
@@ -211,6 +212,7 @@ def main() -> None:
     except RuntimeError as error:
         raise SystemExit(f"UNAVAILABLE: {error}") from None
 
+    handle_model_invocation(model_id, usage)
     print(f"AVAILABLE: {model_id}")
     print(f"Response: {response_text}")
     print(f"Usage: {json.dumps(usage, sort_keys=True)}")

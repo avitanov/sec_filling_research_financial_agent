@@ -9,6 +9,7 @@ from typing import Any
 from strands import Agent, ModelRetryStrategy
 from strands.models import Model
 
+from agent.observation import extract_model_metrics
 from agent.plugins import RetryTrackingPlugin
 from agent.providers import build_model
 from config import (
@@ -18,6 +19,7 @@ from config import (
     EVALUATION_JUDGE_MODEL_ID,
     MODEL_MAX_RETRIES,
 )
+from model_usage import handle_model_invocation
 from models import JudgeScores, RunRecord, ToolEvent
 
 JUDGE_SCORE_FIELDS = (
@@ -194,18 +196,27 @@ class EvaluationJudge:
             if not isinstance(result.structured_output, JudgeScores):
                 raise RuntimeError("Judge did not return the required scores")
             scores = result.structured_output
-            return {
+            score_row = {
                 **score_row,
                 **scores.model_dump(),
                 "failure": None,
             }
         except Exception as error:
-            return {
+            score_row = {
                 **score_row,
                 **{field: None for field in JUDGE_SCORE_FIELDS},
                 "explanation": "",
                 "failure": f"{type(error).__name__}: {error}",
             }
+        token_usage, model_calls = extract_model_metrics(
+            self.agent.event_loop_metrics.get_summary(), self.model_id
+        )
+        call_usages = [model_call.token_usage for model_call in model_calls]
+        if not call_usages and token_usage:
+            call_usages = [token_usage]
+        for call_usage in call_usages:
+            handle_model_invocation(self.model_id, call_usage)
+        return score_row
 
 
 def evaluate_with_llm_judge(
