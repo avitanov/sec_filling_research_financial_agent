@@ -748,28 +748,6 @@ def evaluate_retrieval(
     }
 
 
-def _flatten_summary(summary: dict[str, Any]) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    for name, value in summary.items():
-        if isinstance(value, dict):
-            for child_name, child_value in value.items():
-                if isinstance(child_value, dict):
-                    for metric, metric_value in child_value.items():
-                        rows.append(
-                            {
-                                "metric": f"{name}.{child_name}.{metric}",
-                                "value": metric_value,
-                            }
-                        )
-                else:
-                    rows.append(
-                        {"metric": f"{name}.{child_name}", "value": child_value}
-                    )
-        else:
-            rows.append({"metric": name, "value": value})
-    return rows
-
-
 def save_evaluation_results(
     generated_records: list[RunRecord],
     question_rows: list[dict[str, Any]],
@@ -822,13 +800,11 @@ def save_evaluation_results(
     write_csv(destination / "question_metrics.csv", question_rows)
     write_csv(destination / "retrieval_metrics.csv", retrieval_rows)
     if judge_rows is not None:
-        write_csv(destination / "judge_metrics.csv", judge_rows)
         with (destination / "judge_records.jsonl").open(
             "w", encoding="utf-8"
         ) as output:
             for row in judge_rows:
                 output.write(json.dumps(row, ensure_ascii=False) + "\n")
-    write_csv(destination / "summary_metrics.csv", _flatten_summary(summary))
     (destination / "summary.json").write_text(
         json.dumps(summary, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
