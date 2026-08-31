@@ -60,6 +60,40 @@ def _cost(amount: int, price: Decimal) -> Decimal:
     return Decimal(amount) * price / Decimal("1000000")
 
 
+def model_cost(
+    token_usage: dict[str, int],
+    input_usd_per_million_tokens: Decimal | None,
+    output_usd_per_million_tokens: Decimal | None,
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Calculate one invocation's token prices and cost.
+
+    Args:
+        token_usage: Provider-reported token totals.
+        input_usd_per_million_tokens: Configured input-token price.
+        output_usd_per_million_tokens: Configured output-token price.
+
+    Returns:
+        Pricing metadata and calculated input, output, and total cost.
+    """
+    if input_usd_per_million_tokens is None or output_usd_per_million_tokens is None:
+        return {}, {}
+    input_cost = _cost(token_usage.get("inputTokens", 0), input_usd_per_million_tokens)
+    output_cost = _cost(
+        token_usage.get("outputTokens", 0), output_usd_per_million_tokens
+    )
+    return (
+        {
+            "input": str(input_usd_per_million_tokens),
+            "output": str(output_usd_per_million_tokens),
+        },
+        {
+            "input": str(input_cost),
+            "output": str(output_cost),
+            "total": str(input_cost + output_cost),
+        },
+    )
+
+
 def handle_model_invocation(
     model_id: str, token_usage: dict[str, Any]
 ) -> dict[str, Any]:

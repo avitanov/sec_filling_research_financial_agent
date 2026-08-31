@@ -2,11 +2,30 @@
 
 from typing import TYPE_CHECKING
 
+from botocore.exceptions import EventStreamError
+from botocore.exceptions import ReadTimeoutError as BotocoreReadTimeoutError
+from strands import ModelRetryStrategy
 from strands.hooks import AfterModelCallEvent, HookOrder
 from strands.plugins import Plugin
+from urllib3.exceptions import ReadTimeoutError as Urllib3ReadTimeoutError
 
 if TYPE_CHECKING:
     from strands import Agent
+
+
+class ProviderRetryStrategy(ModelRetryStrategy):
+    """Retry transient provider failures, including Bedrock stream errors."""
+
+    def is_retryable(self, exception: Exception) -> bool:
+        """Return whether a failed model call should be retried."""
+        return super().is_retryable(exception) or isinstance(
+            exception,
+            (
+                EventStreamError,
+                BotocoreReadTimeoutError,
+                Urllib3ReadTimeoutError,
+            ),
+        )
 
 
 class RetryTrackingPlugin(Plugin):

@@ -177,6 +177,10 @@ def format_observable_timeline(timeline: list[dict[str, Any]]) -> str:
         event_type = str(event["type"]).replace("_", " ").upper()
         sequence = event.get("sequence")
         label = f"{position:02d} {event_type}"
+        if event.get("agent_stage"):
+            label += f" [{event['agent_stage']}]"
+        if event.get("agent_attempt"):
+            label += f" attempt {event['agent_attempt']}"
         if sequence is not None:
             label += f" {sequence}"
         sections.extend(
@@ -195,7 +199,7 @@ def count_structured_output_repairs(timeline: list[dict[str, Any]]) -> int:
         Number of schema-repair cycles.
     """
     return sum(
-        "Validation failed for MonolithicAnswer" in json.dumps(event)
+        "Validation failed for" in json.dumps(event)
         for event in timeline
         if event.get("type") == "tool_result"
     )
@@ -367,17 +371,33 @@ def format_run_summary(record: RunRecord, gold_answer: dict[str, Any]) -> str:
         for event in record.tool_events
     )
     evidence_ids = record.answer.evidence_ids if record.answer else []
-    answer_text = record.answer.answer_text if record.answer else "No answer"
+    answer_text = (
+        record.answer.answer_text
+        if record.answer
+        else "Unable to provide a verified answer."
+    )
+    failure = ""
+    if record.answer is None:
+        category = record.failure_category or "unknown_failure"
+        reason = record.failure_message or "No failure reason was recorded."
+        failure = f"\nFailure: {category} — {reason}"
+    repairs = record.structured_output_repairs
+    repair_summary = (
+        f"{repairs} (schema feedback reinvoked the model within the same agent "
+        "invocation)"
+        if repairs
+        else "0 (no schema-driven model reinvocation)"
+    )
     return (
         f"Question: {record.question.question}\n"
-        f"Model answer: {answer_text}\n"
+        f"Model answer: {answer_text}{failure}\n"
         f"Gold answer: {gold_text}\n"
         f"Gold values: {gold_values or '-'}\n"
         f"Tools: {tools or '-'}\n"
         f"Evidence: {', '.join(evidence_ids) or '-'}\n"
         f"Latency: {record.latency_ms} ms | Tokens: {record.token_usage} | "
-        f"Retries: {record.retries}\n"
-        f"Structured-output repairs: {record.structured_output_repairs}\n"
+        f"Provider retries: {record.retries}\n"
+        f"Structured-output repairs: {repair_summary}\n"
         f"Cost: {record.cost_usd or 'not configured'}\n"
         f"Trace: {record.langfuse_trace_url}"
     )
@@ -417,17 +437,19 @@ def create_trace(run_id: str) -> tuple[str, str]:
 
 
 @contextmanager
-def observe_monolithic_run(
+def observe_run(
     trace_id: str,
     question: QuestionInput,
     provider: str,
     model_id: str,
     reasoning_mode: str,
+    architecture: str,
+    pipeline_variant: str | None = None,
 ) -> Iterator[Any]:
-    """Create the root Langfuse observation for one monolithic run."""
+    """Create the root Langfuse observation for one agent-system run."""
     with get_client().start_as_current_observation(
         trace_context={"trace_id": trace_id},
-        name="monolithic-sec-research",
+        name=f"{architecture}-sec-research",
         as_type="agent",
         input={
             "question_id": question.question_id,
@@ -435,7 +457,8 @@ def observe_monolithic_run(
             "question": question.question,
         },
         metadata={
-            "architecture": "monolithic",
+            "architecture": architecture,
+            "pipeline_variant": pipeline_variant,
             "provider": provider,
             "model": model_id,
             "reasoning_mode": reasoning_mode,
@@ -451,11 +474,13 @@ def observe_monolithic_run(
 
 
 @contextmanager
-def propagate_monolithic_attributes(question: QuestionInput) -> Iterator[None]:
+def propagate_run_attributes(
+    question: QuestionInput, architecture: str
+) -> Iterator[None]:
     """Attach run metadata to child Langfuse observations."""
     with propagate_attributes(
-        trace_name="monolithic-sec-research",
-        tags=["phase-1", "monolithic", question.split, question.category],
+        trace_name=f"{architecture}-sec-research",
+        tags=["phase-1", architecture, question.split, question.category],
         metadata={"question_id": question.question_id},
         environment=LANGFUSE_TRACING_ENVIRONMENT,
     ):
