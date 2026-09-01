@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from statistics import mean
 from typing import Any
 
-from strands import Agent, ModelRetryStrategy
+from strands import Agent
 from strands.models import Model
 
 from agent.observation import extract_model_metrics
-from agent.plugins import RetryTrackingPlugin
+from agent.plugins import ProviderRetryStrategy, RetryTrackingPlugin
 from agent.providers import build_model
 from config import (
     AWS_REGION,
@@ -19,8 +20,9 @@ from config import (
     EVALUATION_JUDGE_THINKING_BUDGET_TOKENS,
     EVALUATION_JUDGE_TIMEOUT_SECONDS,
     MODEL_MAX_RETRIES,
+    MODEL_TOKEN_PRICES,
 )
-from model_usage import handle_model_invocation
+from model_usage import handle_model_invocation, model_cost
 from models import JudgeScores, RunRecord, ToolEvent
 
 JUDGE_SCORE_FIELDS = (
@@ -30,6 +32,12 @@ JUDGE_SCORE_FIELDS = (
     "workflow_efficiency",
     "auditability",
 )
+PIPELINE_OUTPUT_NAMES = {
+    "ResearchSubmission",
+    "MathSubmission",
+    "VerifierSubmission",
+    "MonolithicAnswer",
+}
 JUDGE_SYSTEM_PROMPT = """You are evaluating an observable financial-research run.
 Return five scores from 1 to 5 and a short explanation. Use only the supplied
 question, gold requirements, deterministic checks, final answer, and tool events.
@@ -49,8 +57,11 @@ Categories:
   solution to the question.
 - chronological_coherence: whether dependent work happens after its inputs exist.
   Independent lookups or calculations may occur in any order and must not be
-  penalized for differing from the order in the gold record.
+  penalized for differing from the order in the gold record. For a decomposed run,
+  check that a repaired Math attempt follows verifier feedback and that the final
+  answer uses the accepted Math attempt.
 - workflow_efficiency: whether calls are relevant and avoid unnecessary repetition.
+  Do not penalize one justified Math repair; penalize unnecessary repetition.
 - auditability: whether a reviewer can reconstruct the evidence and calculations
   that produced the answer. Score auditability independently from correctness: an
   incorrect answer can still be highly auditable when the trace clearly exposes
@@ -111,6 +122,50 @@ def _compact_tool_result(event: ToolEvent) -> Any:
     return event.result
 
 
+def _compact_pipeline_timeline(record: RunRecord) -> list[dict[str, Any]]:
+    """Keep observable stage outputs and retries needed for workflow grading."""
+    timeline: list[dict[str, Any]] = []
+    for sequence, event in enumerate(record.observable_timeline, start=1):
+        event_type = event.get("type")
+        if event_type == "model_call":
+            visible_output = []
+            for block in event.get("output", []):
+                if "text" in block:
+                    visible_output.append({"text": block["text"]})
+                elif "toolUse" in block:
+                    tool_use = block["toolUse"]
+                    if tool_use.get("name") in PIPELINE_OUTPUT_NAMES:
+                        visible_output.append(
+                            {
+                                "structured_output": {
+                                    "name": tool_use.get("name"),
+                                    "value": tool_use.get("input"),
+                                }
+                            }
+                        )
+            if visible_output:
+                timeline.append(
+                    {
+                        "sequence": sequence,
+                        "type": "model_output",
+                        "agent_stage": event.get("agent_stage"),
+                        "agent_attempt": event.get("agent_attempt"),
+                        "output": visible_output,
+                    }
+                )
+        elif event_type == "retry":
+            timeline.append(
+                {
+                    "sequence": sequence,
+                    "type": "provider_retry",
+                    "agent_stage": event.get("agent_stage"),
+                    "agent_attempt": event.get("agent_attempt"),
+                    "reason": event.get("exception") or event.get("stop_reason"),
+                }
+            )
+    return timeline
+
+
 def _judge_payload(
     record: RunRecord,
     gold: dict[str, Any],
@@ -122,6 +177,11 @@ def _judge_payload(
             "category": record.question.category,
             "company": record.question.company,
             "text": record.question.question,
+        },
+        "pipeline": {
+            "architecture": record.architecture,
+            "variant": record.pipeline_variant,
+            "accepted_math_attempt": record.accepted_math_attempt,
         },
         "gold_requirements": {
             "answer": gold["answer"],
@@ -139,15 +199,21 @@ def _judge_payload(
                 "evidence_valid",
                 "evidence_complete",
                 "periods_valid",
+                "formula_correct",
+                "formatting_correct",
                 "unsupported_values",
+                "audit_trail_complete",
             )
         },
         "generated_answer": (
             record.answer.model_dump() if record.answer is not None else None
         ),
+        "chronological_agent_timeline": _compact_pipeline_timeline(record),
         "chronological_tool_events": [
             {
                 "sequence": event.sequence,
+                "agent_stage": event.agent_stage,
+                "agent_attempt": event.agent_attempt,
                 "name": event.name,
                 "arguments": event.arguments,
                 "success": event.success,
@@ -171,7 +237,7 @@ class EvaluationJudge:
             tools=[],
             callback_handler=None,
             name="financial-run-judge",
-            retry_strategy=ModelRetryStrategy(max_attempts=MODEL_MAX_RETRIES + 1),
+            retry_strategy=ProviderRetryStrategy(max_attempts=MODEL_MAX_RETRIES + 1),
             plugins=[self.retry_tracking],
             structured_output_model=JudgeScores,
             trace_attributes={"role": "evaluation-judge"},
@@ -227,6 +293,18 @@ class EvaluationJudge:
             call_usages = [token_usage]
         for call_usage in call_usages:
             handle_model_invocation(self.model_id, call_usage)
+        pricing, cost = model_cost(
+            token_usage, *MODEL_TOKEN_PRICES.get(self.model_id, (None, None))
+        )
+        score_row.update(
+            {
+                "model_invocations": len(call_usages),
+                "token_usage": token_usage,
+                "pricing_usd_per_million_tokens": pricing,
+                "cost_usd": cost,
+                "retries": self.retry_tracking.count,
+            }
+        )
         return score_row
 
 
@@ -259,9 +337,33 @@ def evaluate_with_llm_judge(
         for record in records
     ]
     successful = [row for row in rows if row["failure"] is None]
+    known_costs = [
+        Decimal(str(row["cost_usd"]["total"]))
+        for row in rows
+        if row.get("cost_usd", {}).get("total") is not None
+    ]
+    total_cost = sum(known_costs, Decimal("0"))
     summary = {
         "judge_run_count": len(rows),
         "judge_success_rate": len(successful) / len(rows) if rows else 0.0,
+        "judge_total_model_invocations": sum(
+            int(row["model_invocations"]) for row in rows
+        ),
+        "judge_total_input_tokens": sum(
+            int(row["token_usage"].get("inputTokens", 0)) for row in rows
+        ),
+        "judge_total_output_tokens": sum(
+            int(row["token_usage"].get("outputTokens", 0)) for row in rows
+        ),
+        "judge_total_reasoning_tokens": sum(
+            int(row["token_usage"].get("reasoningTokens", 0)) for row in rows
+        ),
+        "judge_total_retries": sum(int(row["retries"]) for row in rows),
+        "judge_total_estimated_cost_usd": str(total_cost),
+        "judge_average_estimated_cost_usd": str(
+            total_cost / len(known_costs) if known_costs else Decimal("0")
+        ),
+        "judge_cost_coverage_rate": (len(known_costs) / len(rows) if rows else 0.0),
         **{
             f"average_judge_{field}": (
                 mean(float(row[field]) for row in successful) if successful else None
