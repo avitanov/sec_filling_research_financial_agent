@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from decimal import Decimal, DivisionByZero, InvalidOperation
+from threading import Lock
 from time import perf_counter
 from typing import Any, Literal
 
@@ -40,8 +41,13 @@ def _selected_fields(record: dict[str, Any], fields: tuple[str, ...]) -> dict[st
 class ProjectTools:
     """Provide bounded SEC retrieval, fact lookup, and arithmetic tools."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self, agent_stage: Literal["research", "math", "verifier"] | None = None
+    ) -> None:
         self._events: list[ToolEvent] = []
+        self._event_lock = Lock()
+        self._agent_stage = agent_stage
+        self._agent_attempt: int | None = None
 
     def _record(
         self,
@@ -52,18 +58,29 @@ class ProjectTools:
         error: str | None = None,
         evidence_ids: list[str] | None = None,
     ) -> None:
-        self._events.append(
-            ToolEvent(
-                sequence=len(self._events) + 1,
-                name=name,
-                arguments=arguments,
-                success=error is None,
-                result=result,
-                error=error,
-                evidence_ids=evidence_ids or [],
-                latency_ms=round((perf_counter() - started_at) * 1000, 2),
+        with self._event_lock:
+            self._events.append(
+                ToolEvent(
+                    sequence=len(self._events) + 1,
+                    name=name,
+                    arguments=arguments,
+                    success=error is None,
+                    result=result,
+                    error=error,
+                    evidence_ids=evidence_ids or [],
+                    latency_ms=round((perf_counter() - started_at) * 1000, 2),
+                    agent_stage=self._agent_stage,
+                    agent_attempt=self._agent_attempt,
+                )
             )
-        )
+
+    def set_agent_attempt(self, attempt: int) -> None:
+        """Label subsequent tool events with one stage attempt.
+
+        Args:
+            attempt: One-based stage attempt number for the active question.
+        """
+        self._agent_attempt = attempt
 
     def get_events(self) -> list[ToolEvent]:
         """Return a copy of the canonical tool events.
@@ -71,11 +88,13 @@ class ProjectTools:
         Returns:
             Events in invocation order.
         """
-        return list(self._events)
+        with self._event_lock:
+            return list(self._events)
 
     def reset_events(self) -> None:
         """Clear recorded events before a new isolated question run."""
-        self._events.clear()
+        with self._event_lock:
+            self._events.clear()
 
     @tool
     def search_filing(self, query: str, company: str) -> dict[str, Any]:

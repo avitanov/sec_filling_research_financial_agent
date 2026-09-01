@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from functools import lru_cache
+from threading import Lock
 from typing import Any
 
 import requests
@@ -29,6 +30,7 @@ DENSE_VECTOR_NAME = "dense"
 BM25_VECTOR_NAME = "bm25"
 BM25_MODEL = "qdrant/bm25"
 POINT_NAMESPACE = uuid.UUID("da771b9a-6215-44b3-bc4b-38c92ed6af8a")
+_SEARCH_LOCK = Lock()
 
 
 @lru_cache(maxsize=1)
@@ -247,28 +249,31 @@ def search_filing(query: str, company: str, limit: int = 5) -> list[FilingSearch
         ]
     )
     candidate_limit = max(limit * 2, RETRIEVAL_CANDIDATE_LIMIT)
-    dense_query, query_truncation_message = embed_query(query)
-    response = _client().query_points(
-        collection_name=QDRANT_COLLECTION,
-        prefetch=[
-            models.Prefetch(
-                query=dense_query,
-                using=DENSE_VECTOR_NAME,
-                filter=company_filter,
-                limit=candidate_limit,
-            ),
-            models.Prefetch(
-                query=models.Document(text=query, model=BM25_MODEL),
-                using=BM25_VECTOR_NAME,
-                filter=company_filter,
-                limit=candidate_limit,
-            ),
-        ],
-        query=models.FusionQuery(fusion=models.Fusion.RRF),
-        limit=candidate_limit,
-        with_payload=True,
-        with_vectors=False,
-    )
+    # FastEmbed and the shared Qdrant client can be reached by parallel tool calls.
+    # Serialize this small local section because their internal caches are mutable.
+    with _SEARCH_LOCK:
+        dense_query, query_truncation_message = embed_query(query)
+        response = _client().query_points(
+            collection_name=QDRANT_COLLECTION,
+            prefetch=[
+                models.Prefetch(
+                    query=dense_query,
+                    using=DENSE_VECTOR_NAME,
+                    filter=company_filter,
+                    limit=candidate_limit,
+                ),
+                models.Prefetch(
+                    query=models.Document(text=query, model=BM25_MODEL),
+                    using=BM25_VECTOR_NAME,
+                    filter=company_filter,
+                    limit=candidate_limit,
+                ),
+            ],
+            query=models.FusionQuery(fusion=models.Fusion.RRF),
+            limit=candidate_limit,
+            with_payload=True,
+            with_vectors=False,
+        )
     points = list(response.points)
     page_scores = {
         str(point.payload["evidence_id"]): float(point.score)

@@ -347,8 +347,10 @@ class AnswerValue(BaseModel):
     value: str = Field(
         description=(
             "Plain decimal without commas, currency symbols, percent signs, or "
-            "magnitude words. USD uses absolute digits; percentages use exactly "
-            "two decimal places unless the question requests another precision."
+            "magnitude words. USD uses absolute digits: for example, 15 million "
+            "USD must be returned as 15000000, not 15 or 15 million. Percentages "
+            "use exactly two decimal places unless the question requests another "
+            "precision."
         )
     )
     unit: str | None = Field(description="Required unit: use USD or percent.")
@@ -378,6 +380,36 @@ class CalculationRecord(BaseModel):
     )
 
 
+class ResearchFact(BaseModel):
+    """Represent one financial value selected by the research stage."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    label: str
+    value: str
+    unit: str | None
+    period: str | None
+    evidence_id: str
+
+
+class ResearchSubmission(BaseModel):
+    """Define the evidence package passed from research to the math stage."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    facts: list[ResearchFact]
+    evidence_ids: list[str]
+    calculation_request: str = ""
+
+
+class MathSubmission(BaseModel):
+    """Define the calculator output passed from the math stage to the verifier."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    calculations: list[CalculationRecord]
+
+
 class MonolithicAnswer(BaseModel):
     """Define the structured output returned by the monolithic agent."""
 
@@ -402,6 +434,32 @@ class MonolithicAnswer(BaseModel):
     )
 
 
+class VerifierSubmission(BaseModel):
+    """Define the verifier decision and its constrained final answer."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    approved: bool
+    rejection_reason: str | None = None
+    answer: MonolithicAnswer | None = None
+    retry_stage: Literal["math", "none"] = "none"
+    feedback: str | None = None
+
+    @model_validator(mode="after")
+    def _require_consistent_decision(self) -> "VerifierSubmission":
+        if self.approved and self.answer is None:
+            raise ValueError("An approved verification requires a final answer")
+        if self.approved and self.retry_stage != "none":
+            raise ValueError("An approved verification cannot request a repair")
+        if not self.approved and not self.rejection_reason:
+            raise ValueError("A rejected verification requires a reason")
+        if not self.approved and self.answer is not None:
+            raise ValueError("A rejected verification cannot contain an answer")
+        if not self.approved and self.retry_stage != "none" and not self.feedback:
+            raise ValueError("A repair request requires feedback")
+        return self
+
+
 class ToolEvent(BaseModel):
     """Record one canonical project-tool invocation."""
 
@@ -413,6 +471,8 @@ class ToolEvent(BaseModel):
     error: str | None = None
     evidence_ids: list[str] = Field(default_factory=list)
     latency_ms: float
+    agent_stage: Literal["research", "math", "verifier"] | None = None
+    agent_attempt: int | None = None
 
 
 class ModelCallEvent(BaseModel):
@@ -421,6 +481,8 @@ class ModelCallEvent(BaseModel):
     sequence: int
     model: str
     token_usage: dict[str, int] = Field(default_factory=dict)
+    agent_stage: Literal["research", "math", "verifier"] | None = None
+    agent_attempt: int | None = None
 
 
 class JudgeScores(BaseModel):
@@ -437,17 +499,26 @@ class JudgeScores(BaseModel):
 
 
 class RunRecord(BaseModel):
-    """Store the complete observable record for one monolithic run."""
+    """Store the complete observable record for one agent-system run."""
 
     run_id: str
     started_at: str
     question: QuestionInput
-    architecture: Literal["monolithic"] = "monolithic"
+    architecture: Literal["monolithic", "decomposed"] = "monolithic"
+    pipeline_variant: (
+        Literal[
+            "verification_with_repair",
+            "verification_without_repair",
+            "no_verification",
+        ]
+        | None
+    ) = None
     provider: Literal["openrouter", "bedrock"]
     model: str
     reasoning_mode: str
     status: Literal["success", "failure"]
     answer: MonolithicAnswer | None = None
+    accepted_math_attempt: int | None = Field(default=None, ge=1)
     model_calls: list[ModelCallEvent] = Field(default_factory=list)
     tool_events: list[ToolEvent] = Field(default_factory=list)
     observable_timeline: list[dict[str, Any]] = Field(default_factory=list)

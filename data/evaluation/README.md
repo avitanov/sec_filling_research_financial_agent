@@ -41,12 +41,11 @@ deterministic evaluation are:
 - `required_tools`: minimum tool names needed for Tool Precision, Recall, F1,
   Exact Match, Invocation, and Conditional Execution metrics. It intentionally
   does not prescribe call order or the number of calls;
-- `gold_evidence_ids`: minimum fact and filing records needed to support the
-  answer and calculation audit trail. Filing IDs in this list are also the
-  required targets for Evidence Recall@5;
+- `gold_evidence_ids`: canonical fact and filing records for the reviewed gold
+  path. Filing IDs in this list are the required targets for Evidence Recall@5;
 - `alternative_retrieval_evidence_ids`: additional filing chunks accepted as
-  relevant for Irrelevant Retrieval Rate@5, such as a page containing the
-  required table;
+  relevant for Irrelevant Retrieval Rate@5, such as a supporting page or a
+  duplicate table containing the same reviewed values;
 - `gold_numeric_inputs`: filing-derived values, periods, units, and evidence
   links used when a calculation depends on a value that is not in normalized
   Company Facts;
@@ -69,8 +68,8 @@ saved run records rather than gold data.
 | `split` | `development`, `validation`, or `held_out`. | Keeps experiment partitions separate. |
 | `required_tools` | Minimum tool names needed for the question. | Computes tool precision, recall, F1, exact match, invocation, and execution metrics. |
 | `answer` | Gold answer shape and expected values. | Computes numerical and formatting correctness. |
-| `gold_evidence_ids` | Facts and filing records required to support the answer. | Computes evidence validity, completeness, auditability, and required retrieval targets. |
-| `alternative_retrieval_evidence_ids` | Additional filing IDs accepted as relevant, such as a parent page for a required table. | Prevents equivalent retrieval results from being counted as irrelevant. |
+| `gold_evidence_ids` | Canonical facts and filing records for the reviewed gold path. | Supplies calculation sources and required filing retrieval targets. The agent may cite another returned source for its final values. |
+| `alternative_retrieval_evidence_ids` | Additional filing IDs accepted as relevant, such as a parent page or duplicate table. | Prevents equivalent retrieval results from being counted as irrelevant. |
 | `gold_numeric_inputs` | Exact manually verified values from filing tables that are absent from Company Facts. | Resolves filing-specific calculation inputs and validates supported values. |
 | `gold_calculations` | Expected calculation operations, inputs, and results. | Computes formula correctness and verifies the calculation audit trail. |
 | `gold_filing_pages` | Printed filing pages containing the source information. | Human review and provenance; not used directly in metric formulas. |
@@ -107,7 +106,7 @@ saved run records rather than gold data.
 | `input_refs` | Fact or previous-calculation IDs used as inputs. |
 | `constant_inputs` | Direct numeric constants such as `3` when averaging three years. |
 | `operation` | Allowed operation, such as `add`, `subtract`, `divide`, or `percentage`. |
-| `result` | Expected result of that calculation step. |
+| `result` | Exact result returned by the canonical Decimal calculator. Intermediate results are never rounded; display rounding belongs only in `answer`. |
 
 The `answer.response_type` field defines the scoring shape:
 

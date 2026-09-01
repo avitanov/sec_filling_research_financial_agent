@@ -175,7 +175,7 @@ The main files are:
 - `src/retrieval/embeddings.py`: exact token counting and dense embedding;
 - `src/retrieval/`: Qdrant indexing, validation, and hybrid search;
 - `src/models.py` and `src/exceptions.py`: shared records and explicit failures;
-- `src/agent/`: Phase 1 tools, run records, and monolithic orchestration;
+- `src/agent/`: shared tools plus monolithic and decomposed orchestration;
 - `scripts/index_filings.py`: command-line entry point.
 
 The chunk token audit notebook at
@@ -204,16 +204,81 @@ company-specific train, validation, and held-out test directories. Every
 selected observation is limited to the frozen 10-K accession and cross-checked
 against inline XBRL in the corresponding filing.
 
+## Bedrock smoke tests
+
+The smoke test calls the current Nova Lite dry-run model and also supports the
+later Haiku experiment through the Bedrock Runtime Converse API. Luna uses the
+Bedrock Mantle Responses API. Configure an AWS profile with access to the
+required models, then add its name and region to `.env`:
+
+```dotenv
+AWS_PROFILE="<your-aws-profile>"
+AWS_REGION="<your-aws-region>"
+```
+
+Authenticate using the method configured for that profile. For example, an AWS
+IAM Identity Center profile uses:
+
+```bash
+aws sso login --profile <your-aws-profile>
+```
+
+An active cached session can be reused until it expires. Run the selected model
+check directly with uv:
+
+```bash
+uv run python tests/smoke_test_aws_model.py --model nova-lite
+uv run python tests/smoke_test_aws_model.py --model haiku
+uv run python tests/smoke_test_aws_model.py --model luna
+```
+
+The smoke test sends one short `2 + 2` request to the selected model and prints
+the response and token usage. The default Haiku model ID is a US Bedrock Runtime
+inference profile. Luna uses Bedrock Mantle and explicitly sets
+`reasoning.effort=none`.
+
 ## Phase 1 monolithic agent
 
 Phase 1 implements the monolithic baseline. One reusable Strands agent receives
 each frozen question, uses `search_filing`, `lookup_fact`, and `calculate`, and
 returns both human-readable `answer_text` and an auditable structured answer.
-Gold answers and scoring metadata are never included in the prompt.
+The same agent selects evidence, calculates, and writes the answer; all observable
+calls and results are saved. Gold data is never included in the prompt, and hidden
+reasoning is never stored in the trace.
 
-Development dry runs use Amazon Bedrock's `amazon.nova-lite-v1:0` model. The
-agent records provider-reported token usage. Reasoning content is never saved
-in local records or Langfuse.
+### Monolithic workflow
+
+```mermaid
+flowchart LR
+    Q[Financial question] --> A[One Strands agent]
+    A --> S[search_filing]
+    A --> F[lookup_fact]
+    A --> C[calculate]
+    S --> D[Frozen 10-K evidence]
+    F --> CF[Frozen Company Facts]
+    D --> A
+    CF --> A
+    C --> A
+    A --> O[Final text and structured answer]
+    O --> R[Saved run and observable trace]
+    R --> E[Deterministic evaluation]
+```
+
+### Models used
+
+| Role | Model used | Reasoning |
+| --- | --- | --- |
+| Monolithic AMZN and GOOGL development runs | Amazon Nova Lite, `amazon.nova-lite-v1:0` | Disabled |
+| Optional qualitative evaluation | Claude Haiku 4.5, `us.anthropic.claude-haiku-4-5-20251001-v1:0` | Extended thinking, 1,024-token budget |
+
+### Development finding
+
+Both 16-question Nova Lite batches completed and retrieved complete evidence, but
+numerical correctness was 37.50% for both AMZN and GOOGL. The dominant failures
+were leaving filing values in millions, using a ratio instead of percentage
+growth, choosing the wrong fiscal periods, and omitting values in multi-step
+answers. The monolithic trace was useful for diagnosing these mistakes, but the
+model was not precise enough for reliable multi-step financial calculations.
 
 ```dotenv
 AWS_REGION="<your-aws-region>"
@@ -271,39 +336,59 @@ that optional model separately with:
 uv run python tests/smoke_test_openrouter.py
 ```
 
-The required verification-first system and Bedrock experiment remain separate
-later phases. The required verifier will be deterministic Python, as specified
-in `AGENTS.md`; Langfuse remains observability support only.
+The current decomposed development experiment is described below. The required
+verification-first experiment will replace its LLM verifier with deterministic
+Python verification and a constrained renderer, as specified in `AGENTS.md`.
+Langfuse remains observability support only.
 
-## Bedrock smoke tests
+## Decomposed development pipeline
 
-The smoke test calls the current Nova Lite dry-run model and also supports the
-later Haiku experiment through the Bedrock Runtime Converse API. Luna uses the
-Bedrock Mantle Responses API. Configure an AWS profile with access to the
-required models, then add its name and region to `.env`:
+The decomposed development experiment uses a Research Agent with only evidence
+tools, a Math Agent with only `calculate`, and a Verifier that cannot call tools
+but may request one bounded Math repair. Every attempt remains traceable and only
+the accepted attempt is used for formula evaluation.
+[`Notebook 03`](notebooks/03_decomposed_bedrock_dry_runs.ipynb) runs this
+exploratory LLM pipeline; the required final architecture will replace the LLM
+verifier with deterministic Python verification.
 
-```dotenv
-AWS_PROFILE="<your-aws-profile>"
-AWS_REGION="<your-aws-region>"
+### Decomposed workflow
+
+```mermaid
+flowchart LR
+    Q[Financial question] --> R[Research Agent]
+    R --> S[search_filing]
+    R --> F[lookup_fact]
+    S --> D[Frozen 10-K evidence]
+    F --> CF[Frozen Company Facts]
+    D --> R
+    CF --> R
+    R --> RP[Structured research package]
+    RP --> M[Math Agent]
+    M --> C[calculate]
+    C --> M
+    M --> MP[Structured calculation package]
+    MP --> V[Verifier Agent]
+    V -->|approved| A[Final structured answer]
+    V -->|one repair request| M
+    V -->|rejected| X[Recorded failure]
+    A --> SR[Saved run and chronological trace]
+    X --> SR
+    SR --> E[Same deterministic evaluation]
 ```
 
-Authenticate using the method configured for that profile. For example, an AWS
-IAM Identity Center profile uses:
+### Models used
 
-```bash
-aws sso login --profile <your-aws-profile>
-```
+| Role | Model used | Reasoning |
+| --- | --- | --- |
+| Research, Math, and Verifier in Notebook 03 AMZN and GOOGL runs | Amazon Nova Lite, `amazon.nova-lite-v1:0` | Disabled for all stages |
+| Optional qualitative evaluation | Claude Haiku 4.5, `us.anthropic.claude-haiku-4-5-20251001-v1:0` | Extended thinking, 1,024-token budget |
 
-An active cached session can be reused until it expires. Run the selected model
-check directly with uv:
+### Development finding
 
-```bash
-uv run python tests/smoke_test_aws_model.py --model nova-lite
-uv run python tests/smoke_test_aws_model.py --model haiku
-uv run python tests/smoke_test_aws_model.py --model luna
-```
-
-The smoke test sends one short `2 + 2` request to the selected model and prints
-the response and token usage. The default Haiku model ID is a US Bedrock Runtime
-inference profile. Luna uses Bedrock Mantle and explicitly sets
-`reasoning.effort=none`.
+Decomposition made the evidence, calculation, and final-review stages easier to
+inspect, but it did not make Nova Lite reliably correct: AMZN achieved 37.50%
+numerical correctness and GOOGL 50.00%, while formula correctness was 8.33% for
+both. Research handoffs sometimes omitted returned facts, Math reused the same
+ratio-versus-growth mistakes, and the LLM verifier sometimes rejected correct
+work or approved wrong calculations without requesting repair. This development
+experiment improves diagnosis, not yet verified financial reliability.

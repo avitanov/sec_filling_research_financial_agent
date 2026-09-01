@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from decimal import Decimal
 from time import perf_counter
 from typing import Any
 
-from strands import Agent, ModelRetryStrategy
+from botocore.exceptions import EventStreamError
+from strands import Agent
 from strands.models import Model
 
 from agent.data import load_questions
@@ -18,10 +18,10 @@ from agent.observation import (
     create_trace,
     extract_model_metrics,
     extract_observable_messages,
-    observe_monolithic_run,
-    propagate_monolithic_attributes,
+    observe_run,
+    propagate_run_attributes,
 )
-from agent.plugins import RetryTrackingPlugin
+from agent.plugins import ProviderRetryStrategy, RetryTrackingPlugin
 from agent.providers import ModelProvider, build_model
 from agent.tools import ProjectTools
 from config import (
@@ -44,32 +44,40 @@ from config import (
     QDRANT_COLLECTION,
     RUNS_DIR,
 )
-from model_usage import handle_model_invocation
+from model_usage import handle_model_invocation, model_cost
 from models import MonolithicAnswer, RunRecord
 from retrieval import check_qdrant
 from utils import read_jsonl
 
-SYSTEM_PROMPT = """You are a read-only SEC filing research agent. Use only the
-supplied tools and frozen local data. Do not use outside knowledge, modify data, or
-give financial advice, investment recommendations, predictions, or trade guidance.
-
-- Use evidence only for the company in the question. Match its requested period and
-  unit; before calculating, confirm every input has the requested period. Do not
-  guess when evidence is missing or ambiguous.
+EVIDENCE_RULES = """- Use evidence only for the company in the question. Match its
+  requested period and unit; before calculating, confirm every input has the
+  requested period. Do not guess when evidence is missing or ambiguous.
 - Prefer lookup_fact for normalized facts. Use search_filing when the requested
-  concept, granularity, or context is not available through lookup_fact.
-- Use calculate for every arithmetic step. For growth, calculate (new - old) / old
-  * 100, not new / old * 100. Keep every used calculator operation, exact inputs,
-  and exact result in calculations. Ensure directional wording agrees with results.
-- Ground each reported value in returned evidence or a calculator result. Cite only
-  returned evidence IDs that directly support that value; calculated values cite
-  their input evidence. Put only final requested values in values, and put factual
-  answer claims in conclusions. If the evidence cannot support an answer, say so.
+  concept, granularity, or context is not available through lookup_fact."""
+
+CALCULATION_RULES = """- Use calculate for every arithmetic step. For growth,
+  calculate (new - old) / old * 100, not new / old * 100. Keep every used
+  calculator operation, exact inputs, and exact result in calculations. Ensure
+  directional wording agrees with results."""
+
+FINAL_ANSWER_RULES = """- Ground each reported value in returned evidence or a
+  calculator result. Cite only returned evidence IDs that directly support that
+  value; calculated values cite their input evidence. Put only final requested
+  values in values, and put factual answer claims in conclusions. If the evidence
+  cannot support an answer, say so.
 - Structured values use an absolute plain decimal without commas or symbols, unit
   USD or percent, and periods such as FY2025 or FY2024 to FY2025. In answer_text,
   render USD as $1,000,000 without million/billion abbreviations. Round final
   percentages to two decimal places unless the user requests different precision;
-  retain full precision in calculations and use the same rounded value in prose.
+  retain full precision in calculations and use the same rounded value in prose."""
+
+SYSTEM_PROMPT = f"""You are a read-only SEC filing research agent. Use only the
+supplied tools and frozen local data. Do not use outside knowledge, modify data, or
+give financial advice, investment recommendations, predictions, or trade guidance.
+
+{EVIDENCE_RULES}
+{CALCULATION_RULES}
+{FINAL_ANSWER_RULES}
 
 Return only the requested structured output. Keep the answer concise and do not
 include hidden reasoning.
@@ -108,9 +116,11 @@ def _configured_model(provider: ModelProvider, model_id: str) -> Model:
     )
 
 
-def _failure_category(error: Exception) -> str:
+def categorize_failure(error: Exception) -> str:
     name = type(error).__name__.lower()
     message = str(error).lower()
+    if isinstance(error, EventStreamError) or "modelstreamerrorexception" in message:
+        return "provider_stream_error"
     if (
         "rate" in name
         or "rate limit" in message
@@ -146,31 +156,6 @@ def _failure_category(error: Exception) -> str:
     if "structured" in message or "validation" in name:
         return "invalid_structured_output"
     return "agent_error"
-
-
-def _model_cost(
-    token_usage: dict[str, int],
-    input_usd_per_million_tokens: Decimal | None,
-    output_usd_per_million_tokens: Decimal | None,
-) -> tuple[dict[str, str], dict[str, str]]:
-    """Calculate token cost when prices are configured for a model."""
-    if input_usd_per_million_tokens is None or output_usd_per_million_tokens is None:
-        return {}, {}
-    input_tokens = Decimal(token_usage.get("inputTokens", 0))
-    output_tokens = Decimal(token_usage.get("outputTokens", 0))
-    input_cost = input_tokens * input_usd_per_million_tokens / Decimal("1000000")
-    output_cost = output_tokens * output_usd_per_million_tokens / Decimal("1000000")
-    return (
-        {
-            "input": str(input_usd_per_million_tokens),
-            "output": str(output_usd_per_million_tokens),
-        },
-        {
-            "input": str(input_cost),
-            "output": str(output_cost),
-            "total": str(input_cost + output_cost),
-        },
-    )
 
 
 class MonolithicAgentHarness:
@@ -214,7 +199,7 @@ class MonolithicAgentHarness:
             ],
             callback_handler=None,
             name="monolithic-sec-agent",
-            retry_strategy=ModelRetryStrategy(max_attempts=MODEL_MAX_RETRIES + 1),
+            retry_strategy=ProviderRetryStrategy(max_attempts=MODEL_MAX_RETRIES + 1),
             plugins=[self.retry_tracking],
             structured_output_model=MonolithicAnswer,
             trace_attributes={"architecture": "monolithic"},
@@ -275,15 +260,16 @@ class MonolithicAgentHarness:
         answer: MonolithicAnswer | None = None
         failure_category: str | None = None
         failure_message: str | None = None
-        with observe_monolithic_run(
+        with observe_run(
             trace_id=trace_id,
             question=question_record,
             provider=self.provider,
             model_id=self.model_id,
             reasoning_mode=self.reasoning_mode,
+            architecture="monolithic",
         ) as root_span:
             try:
-                with propagate_monolithic_attributes(question_record):
+                with propagate_run_attributes(question_record, "monolithic"):
                     result = self.agent(
                         (
                             f"Company: {question_record.company}\n"
@@ -305,7 +291,7 @@ class MonolithicAgentHarness:
                 answer = result.structured_output
                 root_span.update(output=answer.model_dump())
             except Exception as error:
-                failure_category = _failure_category(error)
+                failure_category = categorize_failure(error)
                 failure_message = str(error)
                 root_span.update(
                     level="ERROR",
@@ -321,7 +307,7 @@ class MonolithicAgentHarness:
             call_usages = [token_usage]
         for call_usage in call_usages:
             handle_model_invocation(self.model_id, call_usage)
-        pricing, cost = _model_cost(
+        pricing, cost = model_cost(
             token_usage, *MODEL_TOKEN_PRICES.get(self.model_id, (None, None))
         )
         observable_timeline = build_observable_timeline(
