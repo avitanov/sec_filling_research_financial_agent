@@ -931,7 +931,11 @@ def _results_directory_for_run(run_id: str, results_root: Path) -> Path:
 
 
 def _latest_results_directory(
-    results_root: Path, architecture: str, ticker: str
+    results_root: Path,
+    architecture: str,
+    ticker: str,
+    pipeline_variant: str | None = None,
+    reasoning_mode: str | None = None,
 ) -> Path:
     matches: list[Path] = []
     for records_path in sorted(results_root.glob("*/runs.jsonl")):
@@ -943,15 +947,121 @@ def _latest_results_directory(
         if (
             first.get("architecture") == architecture
             and str(question.get("ticker", "")).upper() == ticker.upper()
+            and (
+                pipeline_variant is None
+                or first.get("pipeline_variant") == pipeline_variant
+            )
+            and (
+                reasoning_mode is None or first.get("reasoning_mode") == reasoning_mode
+            )
         ):
             matches.append(records_path.parent)
     if not matches:
+        variant_label = f" {pipeline_variant}" if pipeline_variant else ""
         raise ValueError(
-            f"No saved {architecture} result batch found for {ticker.upper()}"
+            f"No saved {architecture}{variant_label} result batch found for "
+            f"{ticker.upper()}"
         )
     # Result folder names start with a sortable creation timestamp. File updates
     # must not make an older experiment become the "latest" generated batch.
     return max(matches, key=lambda path: path.name)
+
+
+def _resolve_results_directory(
+    results_directory: Path | None,
+    *,
+    run_id: str | None,
+    latest: bool,
+    architecture: str | None,
+    ticker: str | None,
+    pipeline_variant: str | None,
+    reasoning_mode: str | None,
+    results_root: Path | None,
+) -> tuple[Path, str]:
+    """Resolve one saved result directory from one supported reference."""
+    selection_count = sum((results_directory is not None, run_id is not None, latest))
+    if selection_count != 1:
+        raise ValueError(
+            "Provide exactly one of results_directory, run_id, or latest=True"
+        )
+    root = results_root or PROJECT_ROOT / "results"
+    if run_id is not None:
+        return _results_directory_for_run(run_id, root), "saved_run_id"
+    if latest:
+        if architecture is None or ticker is None:
+            raise ValueError("latest=True requires architecture and ticker")
+        return (
+            _latest_results_directory(
+                root, architecture, ticker, pipeline_variant, reasoning_mode
+            ),
+            "latest_saved",
+        )
+    assert results_directory is not None
+    return results_directory, "saved_directory"
+
+
+def load_run(
+    results_directory: Path | None = None,
+    *,
+    run_id: str | None = None,
+    latest: bool = False,
+    architecture: str | None = None,
+    ticker: str | None = None,
+    pipeline_variant: str | None = None,
+    reasoning_mode: str | None = None,
+    results_root: Path | None = None,
+) -> dict[str, Any]:
+    """Load one saved experiment batch without rerunning agents or judges.
+
+    Args:
+        results_directory: Existing result directory containing ``runs.jsonl``.
+        run_id: Optional run ID used to locate its complete saved batch.
+        latest: Whether to select the latest batch for an architecture and ticker.
+        architecture: Required architecture when ``latest`` is true.
+        ticker: Required company ticker when ``latest`` is true.
+        pipeline_variant: Optional variant used to narrow a latest-batch lookup.
+        reasoning_mode: Optional reasoning setting used to narrow a latest lookup.
+        results_root: Optional root used for saved-batch selection.
+
+    Returns:
+        Saved run records and any persisted summary and judge rows.
+
+    Raises:
+        ValueError: If the reference is ambiguous or the batch is invalid.
+    """
+    directory, evaluation_source = _resolve_results_directory(
+        results_directory,
+        run_id=run_id,
+        latest=latest,
+        architecture=architecture,
+        ticker=ticker,
+        pipeline_variant=pipeline_variant,
+        reasoning_mode=reasoning_mode,
+        results_root=results_root,
+    )
+    records_path = directory / "runs.jsonl"
+    records = [RunRecord.model_validate(record) for record in read_jsonl(records_path)]
+    if not records:
+        raise ValueError(f"No saved runs found in {records_path}")
+    tickers = {record.question.ticker for record in records}
+    if len(tickers) != 1:
+        raise ValueError("One saved batch must contain exactly one company ticker")
+
+    summary_path = directory / "summary.json"
+    judge_records_path = directory / "judge_records.jsonl"
+    return {
+        "evaluation_source": evaluation_source,
+        "results_directory": directory,
+        "records": records,
+        "summary": (
+            json.loads(summary_path.read_text(encoding="utf-8"))
+            if summary_path.is_file()
+            else None
+        ),
+        "judge_rows": (
+            read_jsonl(judge_records_path) if judge_records_path.is_file() else []
+        ),
+    }
 
 
 def evaluate_saved_results(
@@ -962,6 +1072,8 @@ def evaluate_saved_results(
     rerun_judge: bool = False,
     architecture: str | None = None,
     ticker: str | None = None,
+    pipeline_variant: str | None = None,
+    reasoning_mode: str | None = None,
     results_root: Path | None = None,
 ) -> dict[str, Any]:
     """Recompute metrics from one saved batch without rerunning the pipeline.
@@ -973,6 +1085,8 @@ def evaluate_saved_results(
         rerun_judge: Whether to make new LLM calls for the qualitative judge.
         architecture: Required architecture when ``latest`` is true.
         ticker: Required company ticker when ``latest`` is true.
+        pipeline_variant: Optional variant used to narrow a latest-batch lookup.
+        reasoning_mode: Optional reasoning setting used to narrow a latest lookup.
         results_root: Optional result root used for saved-batch selection.
 
     Returns:
@@ -981,30 +1095,20 @@ def evaluate_saved_results(
     Raises:
         ValueError: If the reference is ambiguous or the batch is invalid.
     """
-    selection_count = sum((results_directory is not None, run_id is not None, latest))
-    if selection_count != 1:
-        raise ValueError(
-            "Provide exactly one of results_directory, run_id, or latest=True"
-        )
-    root = results_root or PROJECT_ROOT / "results"
-    if run_id is not None:
-        results_directory = _results_directory_for_run(run_id, root)
-        evaluation_source = "saved_run_id"
-    elif latest:
-        if architecture is None or ticker is None:
-            raise ValueError("latest=True requires architecture and ticker")
-        results_directory = _latest_results_directory(root, architecture, ticker)
-        evaluation_source = "latest_saved"
-    else:
-        evaluation_source = "saved_directory"
-    assert results_directory is not None
-    records_path = results_directory / "runs.jsonl"
-    records = [RunRecord.model_validate(record) for record in read_jsonl(records_path)]
-    if not records:
-        raise ValueError(f"No saved runs found in {records_path}")
+    loaded_run = load_run(
+        results_directory,
+        run_id=run_id,
+        latest=latest,
+        architecture=architecture,
+        ticker=ticker,
+        pipeline_variant=pipeline_variant,
+        reasoning_mode=reasoning_mode,
+        results_root=results_root,
+    )
+    evaluation_source = str(loaded_run["evaluation_source"])
+    results_directory = Path(loaded_run["results_directory"])
+    records = list(loaded_run["records"])
     tickers = {record.question.ticker for record in records}
-    if len(tickers) != 1:
-        raise ValueError("One saved batch must contain exactly one company ticker")
 
     gold_records = load_gold_questions(next(iter(tickers)))
     question_rows, summary = evaluate_runs(records, gold_records)
