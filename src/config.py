@@ -6,6 +6,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from guardrails import GUARDRAIL_BLOCKED_MESSAGE
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(PROJECT_ROOT / ".env")
 
@@ -34,7 +36,7 @@ NOVA_LITE_INPUT_USD_PER_MILLION_TOKENS = Decimal("0.06")
 NOVA_LITE_OUTPUT_USD_PER_MILLION_TOKENS = Decimal("0.24")
 BEDROCK_SONNET_MODEL_ID = os.getenv(
     "BEDROCK_SONNET_MODEL_ID",
-    "us.anthropic.claude-sonnet-4-5-20251001-v1:0",
+    "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
 ).strip()
 # Anthropic Claude Sonnet standard on-demand text pricing in us-east-1,
 # verified 2026-08-30.
@@ -85,6 +87,27 @@ MODEL_TOKEN_PRICES[BEDROCK_LUNA_MODEL_ID] = (
 )
 BEDROCK_REASONING_MODE = os.getenv("BEDROCK_REASONING_MODE", "none").strip()
 BEDROCK_MANTLE_TIMEOUT_SECONDS = int(os.getenv("BEDROCK_MANTLE_TIMEOUT_SECONDS", "120"))
+BEDROCK_GUARDRAIL_ID = os.getenv("BEDROCK_GUARDRAIL_ID", "").strip()
+BEDROCK_GUARDRAIL_VERSION = os.getenv("BEDROCK_GUARDRAIL_VERSION", "").strip()
+if bool(BEDROCK_GUARDRAIL_ID) != bool(BEDROCK_GUARDRAIL_VERSION):
+    raise ValueError(
+        "BEDROCK_GUARDRAIL_ID and BEDROCK_GUARDRAIL_VERSION must be set together"
+    )
+BEDROCK_GUARDRAIL_CONFIG: dict[str, str | bool] = (
+    {
+        "guardrail_id": BEDROCK_GUARDRAIL_ID,
+        "guardrail_version": BEDROCK_GUARDRAIL_VERSION,
+        "guardrail_trace": "enabled_full",
+        "guardrail_stream_processing_mode": "sync",
+        "guardrail_redact_input": True,
+        "guardrail_redact_input_message": GUARDRAIL_BLOCKED_MESSAGE,
+        "guardrail_redact_output": True,
+        "guardrail_redact_output_message": GUARDRAIL_BLOCKED_MESSAGE,
+        "guardrail_latest_message": False,
+    }
+    if BEDROCK_GUARDRAIL_ID
+    else {}
+)
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "openai/gpt-oss-20b").strip()
