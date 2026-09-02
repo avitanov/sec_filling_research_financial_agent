@@ -18,6 +18,7 @@ def build_model(
     temperature: float | None = 0,
     client_max_retries: int = 0,
     model_parameters: dict[str, Any] | None = None,
+    guardrail_config: dict[str, str | bool] | None = None,
     api_key: str | None = None,
     base_url: str | None = None,
     region_name: str | None = None,
@@ -32,6 +33,7 @@ def build_model(
         temperature: Sampling temperature.
         client_max_retries: Retries performed by the provider client.
         model_parameters: Optional provider-specific model parameters.
+        guardrail_config: Optional Strands Bedrock guardrail configuration.
         api_key: API key required by an OpenAI-compatible endpoint.
         base_url: Base URL required by an OpenAI-compatible endpoint.
         region_name: AWS region used by Amazon Bedrock.
@@ -56,6 +58,8 @@ def build_model(
         params["temperature"] = temperature
     params["max_tokens"] = max_tokens
     if provider == "openrouter":
+        if guardrail_config:
+            raise ValueError("AWS guardrails can only be used with Bedrock models")
         if not api_key or not base_url:
             raise ValueError("OpenAI-compatible models require api_key and base_url")
         return OpenAIModel(
@@ -71,6 +75,11 @@ def build_model(
     if provider == "bedrock":
         if not region_name:
             raise ValueError("Bedrock models require region_name")
+        guardrail = dict(guardrail_config or {})
+        if bool(guardrail.get("guardrail_id")) != bool(
+            guardrail.get("guardrail_version")
+        ):
+            raise ValueError("Guardrail ID and version must be provided together")
         return BedrockModel(
             region_name=region_name,
             boto_client_config=Config(
@@ -80,5 +89,6 @@ def build_model(
             ),
             model_id=model_id,
             **params,
+            **guardrail,
         )
     raise ValueError(f"Unsupported model provider: {provider}")

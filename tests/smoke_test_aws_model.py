@@ -109,16 +109,17 @@ def _call_converse(
         ),
     )
     try:
-        body: dict[str, Any] = client.converse(
-            modelId=model_id,
-            messages=[
+        request: dict[str, Any] = {
+            "modelId": model_id,
+            "messages": [
                 {
                     "role": "user",
                     "content": [{"text": "What is 2 + 2? Reply with only the number."}],
                 }
             ],
-            inferenceConfig={"maxTokens": 16, "temperature": 0},
-        )
+            "inferenceConfig": {"maxTokens": 16, "temperature": 0},
+        }
+        body: dict[str, Any] = client.converse(**request)
     except ClientError as error:
         error_code = error.response.get("Error", {}).get("Code", "Unknown")
         raise RuntimeError(

@@ -29,6 +29,7 @@ from config import (
     AGENT_MAX_TOTAL_TOKENS,
     AGENT_MAX_TURNS,
     AWS_REGION,
+    BEDROCK_GUARDRAIL_CONFIG,
     BEDROCK_MANTLE_TIMEOUT_SECONDS,
     BEDROCK_NOVA_LITE_MODEL_ID,
     BEDROCK_REASONING_MODE,
@@ -92,6 +93,7 @@ def _configured_model(provider: ModelProvider, model_id: str) -> Model:
             region_name=AWS_REGION,
             timeout_seconds=BEDROCK_MANTLE_TIMEOUT_SECONDS,
             max_tokens=MODEL_MAX_TOKENS,
+            guardrail_config=BEDROCK_GUARDRAIL_CONFIG,
         )
     return build_model(
         provider=provider,

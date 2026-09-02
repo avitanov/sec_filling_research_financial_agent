@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "beautifulsoup4==4.14.2",
-    "boto3==1.43.69",
+    "boto3==1.43.86",
     "fastembed==0.8.0",
     "langchain-community==0.3.31",
     "python-dotenv==1.2.2",
@@ -28,6 +28,9 @@ dev = [
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
+markers = [
+    "aws_guardrail: live Amazon Bedrock Guardrails integration test",
+]
 
 [tool.ruff]
 line-length = 88

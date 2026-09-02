@@ -206,10 +206,10 @@ against inline XBRL in the corresponding filing.
 
 ## Bedrock smoke tests
 
-The smoke test calls the current Nova Lite dry-run model and also supports the
-later Haiku experiment through the Bedrock Runtime Converse API. Luna uses the
-Bedrock Mantle Responses API. Configure an AWS profile with access to the
-required models, then add its name and region to `.env`:
+The smoke test supports Nova Lite, the current Sonnet 4.5 experiment model, and
+Haiku 4.5 through the Bedrock Runtime Converse API. Luna uses the Bedrock Mantle
+Responses API. Configure an AWS profile with access to the required models,
+then add its name and region to `.env`:
 
 ```dotenv
 AWS_PROFILE="<your-aws-profile>"
@@ -228,6 +228,7 @@ check directly with uv:
 
 ```bash
 uv run python tests/smoke_test_aws_model.py --model nova-lite
+uv run python tests/smoke_test_aws_model.py --model sonnet
 uv run python tests/smoke_test_aws_model.py --model haiku
 uv run python tests/smoke_test_aws_model.py --model luna
 ```
@@ -236,6 +237,59 @@ The smoke test sends one short `2 + 2` request to the selected model and prints
 the response and token usage. The default Haiku model ID is a US Bedrock Runtime
 inference profile. Luna uses Bedrock Mantle and explicitly sets
 `reasoning.effort=none`.
+
+## Amazon Bedrock guardrails
+
+The assistant is limited to factual, read-only SEC filing research. Its Bedrock
+guardrail allows filing facts, historical comparisons, and financial
+calculations, but blocks personalized buy/sell/hold recommendations, portfolio
+allocation advice, and requests to place or automate market orders. The policy
+checks both user input and model output, enables prompt-attack filtering, and
+evaluates the complete conversation so a restricted request is still blocked
+after a long sequence of allowed turns. The project exposes no brokerage or
+write tools; this tool boundary is essential because Bedrock guardrails evaluate
+text but do not inspect tool arguments or tool results.
+
+Create or update the guardrail and publish an immutable version:
+
+```bash
+uv run python scripts/configure_guardrail.py
+```
+
+If the provisioning role can create guardrails but cannot list them, create a
+new tagged guardrail directly (do this only once to avoid duplicates):
+
+```bash
+uv run python scripts/configure_guardrail.py --create-only
+```
+
+The provisioner creates the resource with the required
+`Project=auditable-sec-filing-research` tag and reconciles that tag on an
+existing guardrail. The provisioning identity needs `bedrock:ListGuardrails`,
+`bedrock:CreateGuardrail`, `bedrock:UpdateGuardrail`, `bedrock:GetGuardrail`,
+`bedrock:TagResource`, and `bedrock:CreateGuardrailVersion`; an organization
+service-control policy must also allow these actions. Runtime model calls use the normal Bedrock inference
+permissions, while the direct policy tests additionally need
+`bedrock:ApplyGuardrail`.
+
+Copy the two printed values into `.env`:
+
+```dotenv
+BEDROCK_GUARDRAIL_ID="<printed-guardrail-id>"
+BEDROCK_GUARDRAIL_VERSION="<printed-version>"
+```
+
+Every project `BedrockModel` then uses the same guardrail with synchronous
+stream processing and input/output redaction. Run the local configuration tests
+without AWS calls, followed by the opt-in live checks. The live suite tests
+allowed SEC research, blocked advice and trade execution, blocked model output,
+and a restricted request on conversation turn 10:
+
+```bash
+uv run pytest tests/test_guardrails.py -m "not aws_guardrail"
+RUN_AWS_GUARDRAIL_INTEGRATION=1 \
+  uv run pytest tests/test_guardrails.py -m aws_guardrail -s
+```
 
 ## Phase 1 monolithic agent
 
@@ -319,6 +373,20 @@ judge JSONL, the JSON summary, and per-question/retrieval CSV metrics. Cumulativ
 per-model tokens and input/output cost are tracked in the committed
 `results/model_usage/<model>/usage.json` files.
 
+### Centralized model usage and pricing
+
+All completed model calls made through the project harnesses—including
+monolithic, decomposed, evaluation-judge, and smoke-test calls—pass through the
+centralized tracker in [`src/model_usage.py`](src/model_usage.py). The tracker
+updates a committed `results/model_usage/<model>/usage.json` record with the
+model ID, invocation count, input, output, and reasoning tokens, cumulative
+input and output cost, total cost, and the latest update time. Token prices are
+defined once in [`src/config.py`](src/config.py), and every saved experiment run
+records the exact input and output price used by the project for its cost
+calculation. This keeps model-call accounting reproducible and makes the
+project's currently configured price visible even if provider prices change
+later; the configuration comments record when each price was last verified.
+
 The rationale and changes to deterministic and judged metrics are documented in
 [`docs/evaluation.md`](docs/evaluation.md).
 
@@ -336,9 +404,8 @@ that optional model separately with:
 uv run python tests/smoke_test_openrouter.py
 ```
 
-The current decomposed development experiment is described below. The required
-verification-first experiment will replace its LLM verifier with deterministic
-Python verification and a constrained renderer, as specified in `AGENTS.md`.
+The current decomposed experiment is described below. It uses the scoped LLM
+Verifier shown in the workflow and is evaluated from its saved observable trace.
 Langfuse remains observability support only.
 
 ## Decomposed development pipeline
@@ -348,8 +415,7 @@ tools, a Math Agent with only `calculate`, and a Verifier that cannot call tools
 but may request one bounded Math repair. Every attempt remains traceable and only
 the accepted attempt is used for formula evaluation.
 [`Notebook 03`](notebooks/03_decomposed_bedrock_dry_runs.ipynb) runs this
-exploratory LLM pipeline; the required final architecture will replace the LLM
-verifier with deterministic Python verification.
+LLM pipeline for the architecture comparison.
 
 ### Decomposed workflow
 

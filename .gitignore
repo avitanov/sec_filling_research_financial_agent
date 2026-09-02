@@ -5,9 +5,17 @@
 __pycache__/
 .pytest_cache/
 .ruff_cache/
+.mypy_cache/
 .ipynb_checkpoints/
 .cache/
 *.py[cod]
+*.log
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+.DS_Store
 qdrant_storage/
 data/runs/
 results/*

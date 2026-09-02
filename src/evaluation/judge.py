@@ -15,6 +15,7 @@ from agent.plugins import ProviderRetryStrategy, RetryTrackingPlugin
 from agent.providers import build_model
 from config import (
     AWS_REGION,
+    BEDROCK_GUARDRAIL_CONFIG,
     EVALUATION_JUDGE_MAX_TOKENS,
     EVALUATION_JUDGE_MODEL_ID,
     EVALUATION_JUDGE_THINKING_BUDGET_TOKENS,
@@ -94,6 +95,7 @@ def _build_judge_model() -> Model:
                 }
             }
         },
+        guardrail_config=BEDROCK_GUARDRAIL_CONFIG,
     )
 
 
@@ -259,7 +261,6 @@ class EvaluationJudge:
         Returns:
             Persistable judge result containing the grades and failure state.
         """
-        self.agent.messages.clear()
         self.retry_tracking.reset()
         payload = _judge_payload(record, gold, deterministic_row)
         score_row = {
@@ -268,22 +269,32 @@ class EvaluationJudge:
             "category": record.question.category,
             "judge_model": self.model_id,
         }
-        try:
-            result = self.agent(json.dumps(payload, ensure_ascii=False))
-            if not isinstance(result.structured_output, JudgeScores):
-                raise RuntimeError("Judge did not return the required scores")
-            scores = result.structured_output
-            score_row = {
-                **score_row,
-                **scores.model_dump(),
-                "failure": None,
-            }
-        except Exception as error:
+        application_retries = 0
+        last_error: Exception | None = None
+        for attempt in range(MODEL_MAX_RETRIES + 1):
+            self.agent.messages.clear()
+            try:
+                result = self.agent(json.dumps(payload, ensure_ascii=False))
+                if not isinstance(result.structured_output, JudgeScores):
+                    raise RuntimeError("Judge did not return the required scores")
+                scores = result.structured_output
+                score_row = {
+                    **score_row,
+                    **scores.model_dump(),
+                    "failure": None,
+                }
+                break
+            except Exception as error:
+                last_error = error
+                if attempt < MODEL_MAX_RETRIES:
+                    application_retries += 1
+        else:
+            assert last_error is not None
             score_row = {
                 **score_row,
                 **{field: None for field in JUDGE_SCORE_FIELDS},
                 "explanation": "",
-                "failure": f"{type(error).__name__}: {error}",
+                "failure": f"{type(last_error).__name__}: {last_error}",
             }
         token_usage, model_calls = extract_model_metrics(
             self.agent.event_loop_metrics.get_summary(), self.model_id
@@ -302,7 +313,7 @@ class EvaluationJudge:
                 "token_usage": token_usage,
                 "pricing_usd_per_million_tokens": pricing,
                 "cost_usd": cost,
-                "retries": self.retry_tracking.count,
+                "retries": self.retry_tracking.count + application_retries,
             }
         )
         return score_row
@@ -336,6 +347,18 @@ def evaluate_with_llm_judge(
         )
         for record in records
     ]
+    return rows, summarize_judge_rows(rows)
+
+
+def summarize_judge_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Calculate aggregate qualitative metrics from saved judge rows.
+
+    Args:
+        rows: Per-question judge results.
+
+    Returns:
+        Aggregate judge success, usage, cost, and score metrics.
+    """
     successful = [row for row in rows if row["failure"] is None]
     known_costs = [
         Decimal(str(row["cost_usd"]["total"]))
@@ -382,4 +405,4 @@ def evaluate_with_llm_judge(
         for category in sorted({row["category"] for row in successful})
         if (category_rows := [row for row in successful if row["category"] == category])
     }
-    return rows, summary
+    return summary

@@ -1,0 +1,11 @@
+{
+  "model": "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+  "total_invocations": 898,
+  "total_input_tokens": 2923841,
+  "total_output_tokens": 270701,
+  "total_reasoning_tokens": 0,
+  "usd_spent_input": "8.771523",
+  "usd_spent_output": "4.060515",
+  "usd_spent_total": "12.832038",
+  "updated_at": "2026-09-02 16:45:22 CEST"
+}
