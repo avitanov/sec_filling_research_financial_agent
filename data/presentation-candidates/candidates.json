@@ -1,0 +1,1103 @@
+{
+  "schema_version": 1,
+  "content_scope": "Observable actions only; no hidden chain-of-thought.",
+  "metrics_scope": "Every metric saved at question level is included. Batch-only aggregate rates are intentionally excluded because they cannot be assigned to one question.",
+  "selected_architecture": {
+    "architecture": "decomposed",
+    "pipeline_variant": "verification_with_repair",
+    "model": "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+    "reasoning_mode": "none",
+    "selection_reason": "Best overall architecture in the held-out comparison because it produced the strongest formula correctness and audit-trail completeness while retaining full evidence completeness."
+  },
+  "source_batch": "results/2026-09-01T020801802049Z-decomposed-verification_with_repair-us-anthropic-claude-sonnet-4-5-20250929-v1-0-KO",
+  "candidates": [
+    {
+      "question_id": "ko-04",
+      "category": "direct_extraction",
+      "title": "Finding a segment value inside the 10-K",
+      "why_selected": "Unlike a simple consolidated fact lookup, this question requires targeted filing retrieval. The trace clearly shows two searches, evidence selection, a no-calculation handoff, and verification.",
+      "run_id": "ko-04-20260901T020112416480Z",
+      "question": "What was Coca-Cola's EMEA operating income in fiscal 2025?",
+      "timeline": [
+        {
+          "step": 1,
+          "kind": "user_message",
+          "stage": "user",
+          "title": "User asks a segment-specific question",
+          "summary": "The requested EMEA value is not one of the normalized consolidated facts."
+        },
+        {
+          "step": 2,
+          "kind": "model_action",
+          "stage": "research",
+          "title": "Research Agent chooses filing search",
+          "summary": "The first model call requests two targeted searches for EMEA operating income in FY2025.",
+          "model_call": 1
+        },
+        {
+          "step": 3,
+          "kind": "tool_call",
+          "stage": "research",
+          "title": "Search the frozen Coca-Cola 10-K",
+          "calls": [
+            {
+              "tool": "search_filing",
+              "arguments": {
+                "query": "EMEA operating income fiscal 2025",
+                "company": "KO"
+              }
+            },
+            {
+              "tool": "search_filing",
+              "arguments": {
+                "query": "Europe Middle East Africa segment operating income 2025",
+                "company": "KO"
+              }
+            }
+          ]
+        },
+        {
+          "step": 4,
+          "kind": "tool_result",
+          "stage": "research",
+          "title": "Relevant filing evidence is returned",
+          "summary": "Both searches return filing-ko-2025-page-0051. It states EMEA operating income of $4,298 million for FY2025; filing-ko-2025-page-0119-table-01 provides supporting segment context.",
+          "selected_evidence": [
+            "filing-ko-2025-page-0051",
+            "filing-ko-2025-page-0119-table-01"
+          ],
+          "selected_value": {
+            "value": "4298",
+            "unit": "million USD",
+            "period": "FY2025"
+          }
+        },
+        {
+          "step": 5,
+          "kind": "model_action",
+          "stage": "research",
+          "title": "Research Agent submits evidence",
+          "summary": "The second research call selects $4,298 million from page 0051 and states that no calculation is required.",
+          "model_call": 2
+        },
+        {
+          "step": 6,
+          "kind": "model_action",
+          "stage": "math",
+          "title": "Math Agent confirms direct extraction",
+          "summary": "The Math Agent submits an empty calculation list because the answer is directly stated in the filing.",
+          "model_call": 3
+        },
+        {
+          "step": 7,
+          "kind": "verification",
+          "stage": "verifier",
+          "title": "Verifier approves the evidence-backed answer",
+          "summary": "The Verifier converts $4,298 million to the required absolute value of $4,298,000,000, preserves the evidence IDs, and approves the answer.",
+          "model_call": 4,
+          "approved": true
+        },
+        {
+          "step": 8,
+          "kind": "assistant_answer",
+          "stage": "final",
+          "title": "Generated answer",
+          "summary": "Coca-Cola's EMEA operating income in fiscal 2025 was $4,298,000,000."
+        }
+      ],
+      "generated_answer": {
+        "text": "Coca-Cola's EMEA operating income in fiscal 2025 was $4,298,000,000.",
+        "values": [
+          {
+            "label": "EMEA Operating Income",
+            "value": "4298000000",
+            "unit": "USD",
+            "period": "FY2025"
+          }
+        ]
+      },
+      "expected_answer": {
+        "text": "Coca-Cola's EMEA operating income in fiscal 2025 was $4,298,000,000.",
+        "values": [
+          {
+            "label": "EMEA Operating Income",
+            "value": "4298000000",
+            "unit": "USD",
+            "period": "FY2025"
+          }
+        ]
+      },
+      "evaluation": {
+        "user_facing_answer_matches_expected": true,
+        "status": "success",
+        "failure_category": null,
+        "deterministic": {
+          "numerical_correct": true,
+          "numerical_issues": [],
+          "unexpected_values": [],
+          "evidence_valid": true,
+          "invalid_evidence_ids": [],
+          "evidence_complete": true,
+          "missing_evidence_ids": [],
+          "value_evidence_valid": true,
+          "invalid_value_evidence": [],
+          "periods_valid": true,
+          "formula_correct": null,
+          "formatting_correct": true,
+          "unsupported_values": [],
+          "audit_trail_complete": true
+        },
+        "workflow": {
+          "accepted_math_attempt": 1,
+          "math_attempt_count": 1,
+          "math_repair_attempted": false,
+          "math_repair_successful": null,
+          "required_tools": [
+            "search_filing"
+          ],
+          "invoked_tools": [
+            "search_filing"
+          ]
+        },
+        "tool_metrics": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "exact_match": true
+        },
+        "retrieval_metrics": {
+          "applicable": true,
+          "search_calls": [
+            {
+              "search_call_index": 1,
+              "query": "EMEA operating income fiscal 2025",
+              "evidence_recall_at_5": 1.0,
+              "irrelevant_retrieval_rate_at_5": 0.8,
+              "returned_evidence_ids": [
+                "filing-ko-2025-page-0050-table-01",
+                "filing-ko-2025-page-0118-table-03",
+                "filing-ko-2025-page-0051",
+                "filing-ko-2025-page-0126",
+                "filing-ko-2025-page-0047-table-01"
+              ]
+            },
+            {
+              "search_call_index": 2,
+              "query": "Europe Middle East Africa segment operating income 2025",
+              "evidence_recall_at_5": 1.0,
+              "irrelevant_retrieval_rate_at_5": 0.8,
+              "returned_evidence_ids": [
+                "filing-ko-2025-page-0035-table-01",
+                "filing-ko-2025-page-0051",
+                "filing-ko-2025-page-0047-table-01",
+                "filing-ko-2025-page-0050-table-01",
+                "filing-ko-2025-page-0119-table-01"
+              ]
+            }
+          ]
+        },
+        "reliability": {
+          "retries": 0,
+          "structured_output_repairs": 0
+        },
+        "performance": {
+          "latency_ms": 15045.62,
+          "input_tokens": 15905,
+          "output_tokens": 814,
+          "reasoning_tokens": 0,
+          "total_tokens": 16719,
+          "cost_usd": "0.059925"
+        },
+        "judge": {
+          "model": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+          "answer_correctness_grade": 5,
+          "workflow_correctness": 5,
+          "chronological_coherence": 5,
+          "workflow_efficiency": 5,
+          "auditability": 5,
+          "explanation": "The answer exactly matches the gold value and is sourced from filing-ko-2025-page-0051. The workflow used targeted filing search, correctly skipped arithmetic, and preserved a complete evidence trail.",
+          "model_invocations": 1,
+          "input_tokens": 2751,
+          "output_tokens": 1109,
+          "total_tokens": 3860,
+          "retries": 0,
+          "cost_usd": "0.0091256",
+          "failure": null
+        },
+        "note": "All deterministic checks passed."
+      }
+    },
+    {
+      "question_id": "ko-07",
+      "category": "single_formula",
+      "title": "Turning two filing facts into one precise percentage",
+      "why_selected": "This is the cleanest complete formula trace: two normalized fact lookups, one calculator call, and a verified answer that exactly matches the gold value.",
+      "run_id": "ko-07-20260901T020200692425Z",
+      "question": "What share of The Coca-Cola Company's fiscal 2025 net operating revenues was represented by operating cash flow?",
+      "timeline": [
+        {
+          "step": 1,
+          "kind": "user_message",
+          "stage": "user",
+          "title": "User asks for a share of revenue",
+          "summary": "The answer requires FY2025 operating cash flow divided by FY2025 net operating revenues."
+        },
+        {
+          "step": 2,
+          "kind": "model_action",
+          "stage": "research",
+          "title": "Research Agent identifies both required facts",
+          "summary": "The first model call requests revenue and operating-cash-flow facts for Coca-Cola.",
+          "model_call": 1
+        },
+        {
+          "step": 3,
+          "kind": "tool_call",
+          "stage": "research",
+          "title": "Look up normalized Company Facts",
+          "calls": [
+            {
+              "tool": "lookup_fact",
+              "arguments": {
+                "company": "KO",
+                "concept": "revenue"
+              }
+            },
+            {
+              "tool": "lookup_fact",
+              "arguments": {
+                "company": "KO",
+                "concept": "operating_cash_flow"
+              }
+            }
+          ]
+        },
+        {
+          "step": 4,
+          "kind": "tool_result",
+          "stage": "research",
+          "title": "FY2025 facts are selected",
+          "results": [
+            {
+              "evidence_id": "fact-ko-revenue-fy2025",
+              "label": "Net Operating Revenues",
+              "value": "47941000000",
+              "unit": "USD",
+              "period": "FY2025"
+            },
+            {
+              "evidence_id": "fact-ko-operating-cash-flow-fy2025",
+              "label": "Operating Cash Flow",
+              "value": "7408000000",
+              "unit": "USD",
+              "period": "FY2025"
+            }
+          ]
+        },
+        {
+          "step": 5,
+          "kind": "model_action",
+          "stage": "research",
+          "title": "Research Agent hands off a calculation request",
+          "summary": "Calculate 7,408,000,000 as a percentage of 47,941,000,000.",
+          "model_call": 2
+        },
+        {
+          "step": 6,
+          "kind": "model_action",
+          "stage": "math",
+          "title": "Math Agent requests an exact percentage",
+          "summary": "The Math Agent invokes the canonical calculator rather than performing arithmetic in prose.",
+          "model_call": 3
+        },
+        {
+          "step": 7,
+          "kind": "tool_call",
+          "stage": "math",
+          "title": "Calculate the percentage",
+          "tool": "calculate",
+          "arguments": {
+            "operation": "percentage",
+            "inputs": [
+              "7408000000",
+              "47941000000"
+            ]
+          }
+        },
+        {
+          "step": 8,
+          "kind": "tool_result",
+          "stage": "math",
+          "title": "Calculator returns full precision",
+          "result": "15.45232681838092655555787322"
+        },
+        {
+          "step": 9,
+          "kind": "model_action",
+          "stage": "math",
+          "title": "Math Agent submits the calculation",
+          "summary": "The exact calculator result and inputs are passed to verification.",
+          "model_call": 4
+        },
+        {
+          "step": 10,
+          "kind": "verification",
+          "stage": "verifier",
+          "title": "Verifier approves and formats the answer",
+          "summary": "The evidence, period, inputs, and result are consistent. The displayed percentage is rounded to 15.45%.",
+          "model_call": 5,
+          "approved": true
+        },
+        {
+          "step": 11,
+          "kind": "assistant_answer",
+          "stage": "final",
+          "title": "Generated answer",
+          "summary": "Operating cash flow represented 15.45% of FY2025 net operating revenues."
+        }
+      ],
+      "generated_answer": {
+        "text": "Operating cash flow represented 15.45% of The Coca-Cola Company's fiscal 2025 net operating revenues. Operating cash flow was $7,408,000,000 and net operating revenues were $47,941,000,000.",
+        "values": [
+          {
+            "label": "Operating cash flow as percentage of net operating revenues",
+            "value": "15.45",
+            "unit": "percent",
+            "period": "FY2025"
+          }
+        ]
+      },
+      "expected_answer": {
+        "text": "Operating cash flow represented 15.45% of net operating revenues in FY2025.",
+        "values": [
+          {
+            "label": "Operating cash flow share",
+            "value": "15.45",
+            "unit": "percent",
+            "period": "FY2025"
+          }
+        ]
+      },
+      "evaluation": {
+        "user_facing_answer_matches_expected": true,
+        "status": "success",
+        "failure_category": null,
+        "deterministic": {
+          "numerical_correct": true,
+          "numerical_issues": [],
+          "unexpected_values": [],
+          "evidence_valid": true,
+          "invalid_evidence_ids": [],
+          "evidence_complete": true,
+          "missing_evidence_ids": [],
+          "value_evidence_valid": true,
+          "invalid_value_evidence": [],
+          "periods_valid": true,
+          "formula_correct": true,
+          "formatting_correct": true,
+          "unsupported_values": [],
+          "audit_trail_complete": true
+        },
+        "workflow": {
+          "accepted_math_attempt": 1,
+          "math_attempt_count": 1,
+          "math_repair_attempted": false,
+          "math_repair_successful": null,
+          "required_tools": [
+            "calculate",
+            "lookup_fact"
+          ],
+          "invoked_tools": [
+            "calculate",
+            "lookup_fact"
+          ]
+        },
+        "tool_metrics": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "exact_match": true
+        },
+        "retrieval_metrics": {
+          "applicable": false,
+          "reason": "This run used normalized fact lookup and did not call search_filing."
+        },
+        "reliability": {
+          "retries": 0,
+          "structured_output_repairs": 0
+        },
+        "performance": {
+          "latency_ms": 16552.34,
+          "input_tokens": 8319,
+          "output_tokens": 1061,
+          "reasoning_tokens": 0,
+          "total_tokens": 9380,
+          "cost_usd": "0.040872"
+        },
+        "judge": {
+          "model": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+          "answer_correctness_grade": 5,
+          "workflow_correctness": 5,
+          "chronological_coherence": 5,
+          "workflow_efficiency": 5,
+          "auditability": 5,
+          "explanation": "The answer matches the expected 15.45%. Both required FY2025 facts and the exact percentage calculation are directly auditable.",
+          "model_invocations": 1,
+          "input_tokens": 3330,
+          "output_tokens": 1127,
+          "total_tokens": 4457,
+          "retries": 0,
+          "cost_usd": "0.0098615",
+          "failure": null
+        },
+        "note": "Every deterministic and judge check passed."
+      }
+    },
+    {
+      "question_id": "ko-09",
+      "category": "period_comparison",
+      "title": "Comparing two growth rates across fiscal years",
+      "why_selected": "This trace is accurate, fully auditable, and visually engaging: it retrieves four period-specific facts, calculates two growth rates, visibly corrects an intermediate tool strategy, and computes the final percentage-point spread.",
+      "run_id": "ko-09-20260901T020238593833Z",
+      "question": "Between fiscal 2024 and fiscal 2025, how did Coca-Cola's net operating revenues growth compare with its operating income growth?",
+      "timeline": [
+        {
+          "step": 1,
+          "kind": "user_message",
+          "stage": "user",
+          "title": "User asks for a two-period comparison",
+          "summary": "The answer requires revenue growth, operating-income growth, and their difference."
+        },
+        {
+          "step": 2,
+          "kind": "model_action",
+          "stage": "research",
+          "title": "Research Agent requests both financial concepts",
+          "summary": "The first research call requests normalized revenue and operating-income facts.",
+          "model_call": 1
+        },
+        {
+          "step": 3,
+          "kind": "tool_call",
+          "stage": "research",
+          "title": "Look up revenue and operating income",
+          "calls": [
+            {
+              "tool": "lookup_fact",
+              "arguments": {
+                "company": "KO",
+                "concept": "revenue"
+              }
+            },
+            {
+              "tool": "lookup_fact",
+              "arguments": {
+                "company": "KO",
+                "concept": "operating_income"
+              }
+            }
+          ]
+        },
+        {
+          "step": 4,
+          "kind": "tool_result",
+          "stage": "research",
+          "title": "Four matching period values are returned",
+          "results": [
+            {
+              "evidence_id": "fact-ko-revenue-fy2024",
+              "value": "47061000000",
+              "unit": "USD",
+              "period": "FY2024"
+            },
+            {
+              "evidence_id": "fact-ko-revenue-fy2025",
+              "value": "47941000000",
+              "unit": "USD",
+              "period": "FY2025"
+            },
+            {
+              "evidence_id": "fact-ko-operating-income-fy2024",
+              "value": "9992000000",
+              "unit": "USD",
+              "period": "FY2024"
+            },
+            {
+              "evidence_id": "fact-ko-operating-income-fy2025",
+              "value": "13762000000",
+              "unit": "USD",
+              "period": "FY2025"
+            }
+          ]
+        },
+        {
+          "step": 5,
+          "kind": "model_action",
+          "stage": "research",
+          "title": "Research Agent defines the calculation plan",
+          "summary": "For each metric: subtract FY2024 from FY2025, divide by FY2024, convert to percent, then compare the two rates.",
+          "model_call": 2
+        },
+        {
+          "step": 6,
+          "kind": "tool_call",
+          "stage": "math",
+          "title": "Calculate both dollar changes",
+          "model_call": 3,
+          "calls": [
+            {
+              "tool": "calculate",
+              "arguments": {
+                "operation": "subtract",
+                "inputs": [
+                  "47941000000",
+                  "47061000000"
+                ]
+              },
+              "result": "880000000"
+            },
+            {
+              "tool": "calculate",
+              "arguments": {
+                "operation": "subtract",
+                "inputs": [
+                  "13762000000",
+                  "9992000000"
+                ]
+              },
+              "result": "3770000000"
+            }
+          ]
+        },
+        {
+          "step": 7,
+          "kind": "tool_call",
+          "stage": "math",
+          "title": "Inspect both growth ratios",
+          "model_call": 4,
+          "calls": [
+            {
+              "tool": "calculate",
+              "arguments": {
+                "operation": "divide",
+                "inputs": [
+                  "880000000",
+                  "47061000000"
+                ]
+              },
+              "result": "0.01869913516499861881387985806"
+            },
+            {
+              "tool": "calculate",
+              "arguments": {
+                "operation": "divide",
+                "inputs": [
+                  "3770000000",
+                  "9992000000"
+                ]
+              },
+              "result": "0.3773018414731785428342674139"
+            }
+          ]
+        },
+        {
+          "step": 8,
+          "kind": "model_action",
+          "stage": "math",
+          "title": "Math Agent detects an unsuitable conversion path",
+          "summary": "A divide-by-100 attempt would move the ratios in the wrong direction. The next observable model call explicitly switches to the calculator's percentage operation.",
+          "model_calls": [
+            5,
+            6
+          ],
+          "included_in_accepted_calculations": false
+        },
+        {
+          "step": 9,
+          "kind": "tool_call",
+          "stage": "math",
+          "title": "Recalculate both rates correctly",
+          "model_call": 6,
+          "calls": [
+            {
+              "tool": "calculate",
+              "arguments": {
+                "operation": "percentage",
+                "inputs": [
+                  "880000000",
+                  "47061000000"
+                ]
+              },
+              "result": "1.869913516499861881387985806"
+            },
+            {
+              "tool": "calculate",
+              "arguments": {
+                "operation": "percentage",
+                "inputs": [
+                  "3770000000",
+                  "9992000000"
+                ]
+              },
+              "result": "37.73018414731785428342674139"
+            }
+          ]
+        },
+        {
+          "step": 10,
+          "kind": "tool_call",
+          "stage": "math",
+          "title": "Calculate the growth-rate spread",
+          "model_call": 7,
+          "tool": "calculate",
+          "arguments": {
+            "operation": "subtract",
+            "inputs": [
+              "37.73018414731785428342674139",
+              "1.869913516499861881387985806"
+            ]
+          },
+          "result": "35.86027063081799240203875558"
+        },
+        {
+          "step": 11,
+          "kind": "model_action",
+          "stage": "math",
+          "title": "Math Agent submits only the accepted calculation path",
+          "summary": "The submitted record contains the two changes, two percentage calculations, and final spread. The discarded conversion calls remain visible in the trace but are not treated as accepted calculations.",
+          "model_call": 8
+        },
+        {
+          "step": 12,
+          "kind": "verification",
+          "stage": "verifier",
+          "title": "Verifier reviews evidence and every dependency",
+          "summary": "The Verifier confirms the four source facts, both growth rates, and the 35.86-point difference before approving the answer.",
+          "model_call": 9,
+          "approved": true
+        },
+        {
+          "step": 13,
+          "kind": "assistant_answer",
+          "stage": "final",
+          "title": "Generated answer",
+          "summary": "Revenue grew 1.87%; operating income grew 37.73%; operating-income growth was higher by 35.86 percentage points."
+        }
+      ],
+      "generated_answer": {
+        "text": "Between fiscal 2024 and fiscal 2025, Coca-Cola's operating income growth significantly outpaced its net operating revenues growth. Net operating revenues grew 1.87%, increasing from $47,061,000,000 in FY2024 to $47,941,000,000 in FY2025. Operating income grew 37.73%, increasing from $9,992,000,000 in FY2024 to $13,762,000,000 in FY2025. Operating income growth exceeded revenue growth by 35.86 percentage points.",
+        "values": [
+          {
+            "label": "Net Operating Revenues Growth Rate",
+            "value": "1.87",
+            "unit": "percent",
+            "period": "FY2024 to FY2025"
+          },
+          {
+            "label": "Operating Income Growth Rate",
+            "value": "37.73",
+            "unit": "percent",
+            "period": "FY2024 to FY2025"
+          }
+        ]
+      },
+      "expected_answer": {
+        "text": "Net operating revenues grew 1.87%, operating income grew 37.73%, and operating income therefore grew faster by 35.86 percentage points.",
+        "values": [
+          {
+            "label": "Net Operating Revenues Growth Rate",
+            "value": "1.87",
+            "unit": "percent",
+            "period": "FY2024 to FY2025"
+          },
+          {
+            "label": "Operating Income Growth Rate",
+            "value": "37.73",
+            "unit": "percent",
+            "period": "FY2024 to FY2025"
+          },
+          {
+            "label": "Growth Rate Difference",
+            "value": "35.86",
+            "unit": "percentage points",
+            "period": "FY2024 to FY2025"
+          }
+        ]
+      },
+      "evaluation": {
+        "user_facing_answer_matches_expected": true,
+        "status": "success",
+        "failure_category": null,
+        "deterministic": {
+          "numerical_correct": true,
+          "numerical_issues": [],
+          "unexpected_values": [],
+          "evidence_valid": true,
+          "invalid_evidence_ids": [],
+          "evidence_complete": true,
+          "missing_evidence_ids": [],
+          "value_evidence_valid": true,
+          "invalid_value_evidence": [],
+          "periods_valid": true,
+          "formula_correct": true,
+          "formatting_correct": true,
+          "unsupported_values": [],
+          "audit_trail_complete": true
+        },
+        "workflow": {
+          "accepted_math_attempt": 1,
+          "math_attempt_count": 1,
+          "math_repair_attempted": false,
+          "math_repair_successful": null,
+          "required_tools": [
+            "calculate",
+            "lookup_fact"
+          ],
+          "invoked_tools": [
+            "calculate",
+            "lookup_fact"
+          ]
+        },
+        "tool_metrics": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "exact_match": true
+        },
+        "retrieval_metrics": {
+          "applicable": false,
+          "reason": "This run used normalized fact lookup and did not call search_filing."
+        },
+        "reliability": {
+          "retries": 0,
+          "structured_output_repairs": 0
+        },
+        "performance": {
+          "latency_ms": 38947.17,
+          "input_tokens": 19371,
+          "output_tokens": 2980,
+          "reasoning_tokens": 0,
+          "total_tokens": 22351,
+          "cost_usd": "0.102813"
+        },
+        "judge": {
+          "model": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+          "answer_correctness_grade": 5,
+          "workflow_correctness": 5,
+          "chronological_coherence": 5,
+          "workflow_efficiency": 5,
+          "auditability": 5,
+          "explanation": "Both growth rates and the 35.86 percentage-point difference match the gold answer. The facts and accepted calculation dependencies are fully traceable.",
+          "model_invocations": 1,
+          "input_tokens": 5972,
+          "output_tokens": 1600,
+          "total_tokens": 7572,
+          "retries": 0,
+          "cost_usd": "0.0153692",
+          "failure": null
+        },
+        "note": "All deterministic checks passed; the trace also provides a useful visible self-correction story."
+      }
+    },
+    {
+      "question_id": "ko-15",
+      "category": "multi_step",
+      "title": "Building and comparing a three-year cash-flow average",
+      "why_selected": "This is the clearest chained calculation: retrieve three annual facts, sum them, compute the average, calculate the dollar difference, calculate the percentage difference, and verify the full dependency chain.",
+      "run_id": "ko-15-20260901T020632221494Z",
+      "question": "How did Coca-Cola's fiscal 2025 operating cash flow compare with its average annual operating cash flow for fiscal 2023 through fiscal 2025?",
+      "timeline": [
+        {
+          "step": 1,
+          "kind": "user_message",
+          "stage": "user",
+          "title": "User asks for a three-year comparison",
+          "summary": "The answer requires a three-year average, a dollar difference, and a percentage difference."
+        },
+        {
+          "step": 2,
+          "kind": "model_action",
+          "stage": "research",
+          "title": "Research Agent requests operating-cash-flow facts",
+          "summary": "One normalized lookup can return every frozen period needed for the calculation.",
+          "model_call": 1
+        },
+        {
+          "step": 3,
+          "kind": "tool_call",
+          "stage": "research",
+          "title": "Look up operating cash flow",
+          "tool": "lookup_fact",
+          "arguments": {
+            "company": "KO",
+            "concept": "operating_cash_flow"
+          }
+        },
+        {
+          "step": 4,
+          "kind": "tool_result",
+          "stage": "research",
+          "title": "Three annual values are returned",
+          "results": [
+            {
+              "evidence_id": "fact-ko-operating-cash-flow-fy2023",
+              "value": "11599000000",
+              "unit": "USD",
+              "period": "FY2023"
+            },
+            {
+              "evidence_id": "fact-ko-operating-cash-flow-fy2024",
+              "value": "6805000000",
+              "unit": "USD",
+              "period": "FY2024"
+            },
+            {
+              "evidence_id": "fact-ko-operating-cash-flow-fy2025",
+              "value": "7408000000",
+              "unit": "USD",
+              "period": "FY2025"
+            }
+          ]
+        },
+        {
+          "step": 5,
+          "kind": "model_action",
+          "stage": "research",
+          "title": "Research Agent defines the dependency chain",
+          "summary": "Add the three values, divide by three, subtract the average from FY2025, then express the difference as a percentage of the average.",
+          "model_call": 2
+        },
+        {
+          "step": 6,
+          "kind": "tool_call",
+          "stage": "math",
+          "title": "Add the three years",
+          "model_call": 3,
+          "tool": "calculate",
+          "arguments": {
+            "operation": "add",
+            "inputs": [
+              "11599000000",
+              "6805000000",
+              "7408000000"
+            ]
+          },
+          "result": "25812000000"
+        },
+        {
+          "step": 7,
+          "kind": "tool_call",
+          "stage": "math",
+          "title": "Calculate the three-year average",
+          "model_call": 4,
+          "tool": "calculate",
+          "arguments": {
+            "operation": "divide",
+            "inputs": [
+              "25812000000",
+              "3"
+            ]
+          },
+          "result": "8604000000"
+        },
+        {
+          "step": 8,
+          "kind": "tool_call",
+          "stage": "math",
+          "title": "Compare FY2025 with the average",
+          "model_call": 5,
+          "tool": "calculate",
+          "arguments": {
+            "operation": "subtract",
+            "inputs": [
+              "7408000000",
+              "8604000000"
+            ]
+          },
+          "result": "-1196000000"
+        },
+        {
+          "step": 9,
+          "kind": "model_action",
+          "stage": "math",
+          "title": "Math Agent corrects the percentage operation",
+          "summary": "The trace first computes a decimal ratio and then tries an unsuitable divide-by-100 conversion. The next observable call explicitly switches to the percentage operation; the discarded calls remain auditable.",
+          "model_calls": [
+            6,
+            7,
+            8
+          ],
+          "included_in_accepted_calculations": false
+        },
+        {
+          "step": 10,
+          "kind": "tool_call",
+          "stage": "math",
+          "title": "Calculate the percentage difference correctly",
+          "model_call": 8,
+          "tool": "calculate",
+          "arguments": {
+            "operation": "percentage",
+            "inputs": [
+              "-1196000000",
+              "8604000000"
+            ]
+          },
+          "result": "-13.90051139005113900511390051"
+        },
+        {
+          "step": 11,
+          "kind": "model_action",
+          "stage": "math",
+          "title": "Math Agent submits the accepted four-step calculation",
+          "summary": "Only add, divide, subtract, and percentage are included in the submitted calculation record.",
+          "model_call": 9
+        },
+        {
+          "step": 12,
+          "kind": "verification",
+          "stage": "verifier",
+          "title": "Verifier checks the complete chain",
+          "summary": "The Verifier checks the three evidence IDs and reproduces the sum, average, dollar difference, and percentage difference before approving.",
+          "model_call": 10,
+          "approved": true
+        },
+        {
+          "step": 13,
+          "kind": "assistant_answer",
+          "stage": "final",
+          "title": "Generated answer",
+          "summary": "FY2025 cash flow was $7.408 billion, which was $1.196 billion or 13.90% below the $8.604 billion three-year average."
+        }
+      ],
+      "generated_answer": {
+        "text": "Coca-Cola's fiscal 2025 operating cash flow was $7,408,000,000. The average annual operating cash flow for fiscal 2023 through fiscal 2025 was $8,604,000,000. Coca-Cola's FY2025 operating cash flow was $1,196,000,000 below the three-year average, representing a decrease of 13.90%.",
+        "values": [
+          {
+            "label": "Operating Cash Flow FY2025",
+            "value": "7408000000",
+            "unit": "USD",
+            "period": "FY2025"
+          },
+          {
+            "label": "Average Annual Operating Cash Flow FY2023-FY2025",
+            "value": "8604000000",
+            "unit": "USD",
+            "period": "FY2023 to FY2025"
+          },
+          {
+            "label": "Difference from Average",
+            "value": "-1196000000",
+            "unit": "USD",
+            "period": "FY2025"
+          },
+          {
+            "label": "Percentage Difference from Average",
+            "value": "-13.90",
+            "unit": "percent",
+            "period": "FY2025"
+          }
+        ]
+      },
+      "expected_answer": {
+        "text": "The FY2023-FY2025 average operating cash flow was $8,604,000,000. FY2025 was $1,196,000,000, or 13.90%, below that average.",
+        "values": [
+          {
+            "label": "Three-year average operating cash flow",
+            "value": "8604000000.00",
+            "unit": "USD",
+            "period": "FY2023 to FY2025"
+          },
+          {
+            "label": "FY2025 difference from average",
+            "value": "-1196000000.00",
+            "unit": "USD",
+            "period": "FY2025"
+          },
+          {
+            "label": "FY2025 percentage difference from average",
+            "value": "-13.90",
+            "unit": "percent",
+            "period": "FY2025"
+          }
+        ]
+      },
+      "evaluation": {
+        "user_facing_answer_matches_expected": true,
+        "status": "success",
+        "failure_category": null,
+        "deterministic": {
+          "numerical_correct": false,
+          "numerical_issues": [],
+          "unexpected_values": [
+            "Operating Cash Flow FY2025=7408000000 USD"
+          ],
+          "evidence_valid": true,
+          "invalid_evidence_ids": [],
+          "evidence_complete": true,
+          "missing_evidence_ids": [],
+          "value_evidence_valid": true,
+          "invalid_value_evidence": [],
+          "periods_valid": true,
+          "formula_correct": true,
+          "formatting_correct": false,
+          "unsupported_values": [],
+          "audit_trail_complete": true
+        },
+        "workflow": {
+          "accepted_math_attempt": 1,
+          "math_attempt_count": 1,
+          "math_repair_attempted": false,
+          "math_repair_successful": null,
+          "required_tools": [
+            "calculate",
+            "lookup_fact"
+          ],
+          "invoked_tools": [
+            "calculate",
+            "lookup_fact"
+          ]
+        },
+        "tool_metrics": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "exact_match": true
+        },
+        "retrieval_metrics": {
+          "applicable": false,
+          "reason": "This run used normalized fact lookup and did not call search_filing."
+        },
+        "reliability": {
+          "retries": 0,
+          "structured_output_repairs": 0
+        },
+        "performance": {
+          "latency_ms": 38735.83,
+          "input_tokens": 18399,
+          "output_tokens": 2689,
+          "reasoning_tokens": 0,
+          "total_tokens": 21088,
+          "cost_usd": "0.095532"
+        },
+        "judge": {
+          "model": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+          "answer_correctness_grade": 4,
+          "workflow_correctness": 5,
+          "chronological_coherence": 5,
+          "workflow_efficiency": 5,
+          "auditability": 5,
+          "explanation": "All required values match the gold answer and the calculation chain is correct. The strict numerical check failed because the valid FY2025 input was also returned as an additional structured output.",
+          "model_invocations": 1,
+          "input_tokens": 5578,
+          "output_tokens": 2675,
+          "total_tokens": 8253,
+          "retries": 0,
+          "cost_usd": "0.0208483",
+          "failure": null
+        },
+        "note": "The requested values and final prose match the gold answer. Strict numerical scoring failed because the structured response also included the valid FY2025 operating-cash-flow input, which the gold output schema did not request."
+      }
+    }
+  ]
+}
