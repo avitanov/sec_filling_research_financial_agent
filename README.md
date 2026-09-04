@@ -1,8 +1,9 @@
 # Auditable SEC Filing Research
 
-This MVP compares a monolithic filing-research agent with a verification-first
-pipeline using the same frozen SEC evidence. This project includes the reproducible
-parsing, chunking, embedding, and retrieval foundation for that comparison.
+An auditable research MVP for answering questions from SEC filings. It compares
+a monolithic filing-research agent with a verification-first pipeline against
+the same frozen evidence, asking whether clearer process boundaries improve the
+audit trail without sacrificing numerical accuracy.
 
 A small two-page web demo (`demo/`) makes the pipeline legible to an audience: a
 scripted walkthrough of curated runs and a live chat that answers questions on
@@ -10,6 +11,77 @@ demand about the three companies' 10-K filings, with every number shown against
 its evidence. It is presentation tooling only — see the
 [Presentation demo](#presentation-demo) section below and
 [`demo/README.md`](demo/README.md).
+
+## Business problem
+
+A business analyst may need to answer a seemingly simple question before a
+meeting: *How did a company's operating income change this year?* Producing a
+defensible answer requires more than locating a number. The analyst must find
+the right disclosure in a filing that may span hundreds of pages, confirm the
+company, fiscal period, unit, and accounting concept, calculate any comparison,
+and leave enough evidence for someone else to review the work.
+
+Public financial information is available, but converting it into a reviewable
+answer is slow and carries rework risk. A number without a source page cannot be
+quickly challenged or confirmed; a result without a recorded formula cannot be
+diagnosed when it is wrong. This project therefore treats an answer as a small
+audit package: every reported value keeps its source evidence, period, unit, and
+calculation record — its “receipt.”
+
+The MVP supports repeatable research on public-company filings, finance
+education, internal comparative analysis, and review workflows. It is not a
+trading system, does not use private data, does not provide investment advice,
+and does not replace professional judgement.
+
+## Research question and scope
+
+> Compared with one tool-using agent, does a verification-first pipeline
+> produce better audit trails while keeping similar numerical accuracy?
+
+The controlled experiment uses one frozen fiscal-year 2025 10-K and one SEC
+Company Facts file for each of Amazon (`AMZN`), Alphabet (`GOOGL`), and
+Coca-Cola (`KO`). It evaluates 48 manually verified questions: 16 development
+questions for Amazon, 16 validation questions for Alphabet, and 16 held-out
+questions for Coca-Cola. The held-out results are not used to tune prompts,
+retrieval, formulas, tools, verification rules, or model settings.
+
+## Repository structure
+
+```text
+.
+├── data/
+│   ├── evaluation/                 # Frozen gold facts and 48 benchmark questions
+│   ├── presentation-candidates/    # Curated saved runs for the walkthrough demo
+│   ├── raw/                        # Downloaded frozen 10-K and Company Facts inputs (ignored by Git)
+│   └── manifest.csv                # Source URLs, filing metadata, and SHA-256 checksums
+├── demo/                           # Optional two-page presentation application
+│   ├── presentation/               # Replay, labels, timeline, and evaluation adapters
+│   └── static/                     # HTML, CSS, and browser JavaScript
+├── docs/                           # Retrieval and evaluation design notes
+├── notebooks/                      # Reproducible index audit and experiment notebooks
+├── results/                        # Saved experiment batches and model-usage totals
+├── scripts/                        # Data download, index build, and guardrail commands
+├── src/
+│   ├── agent/                      # Tools, model providers, traces, and agent orchestration
+│   ├── evaluation/                 # Deterministic metrics and optional qualitative review
+│   └── retrieval/                  # Filing parsing, chunking, embedding, indexing, and search
+├── tests/                          # Deterministic retrieval, integrity, embedding, and guardrail tests
+├── .env.example                    # Required local configuration names (never commit secrets)
+├── compose.yaml                    # Local Qdrant service
+├── pyproject.toml / uv.lock        # Python dependencies and locked environment
+└── README.md                       # Project overview and reproduction guide
+```
+
+| Location | What it contains | When to use it |
+| --- | --- | --- |
+| `data/manifest.csv` | The authoritative inventory of frozen inputs and their checksums. | Inspect provenance or validate local files. |
+| `data/evaluation/` | Gold facts, question splits, calculation graphs, and evidence requirements. | Understand or reproduce scoring; never feed gold metadata to an agent. |
+| `src/` | The application logic, separated by retrieval, orchestration, and evaluation responsibilities. | Read or extend the MVP implementation. |
+| `scripts/` | Small command-line entry points for data preparation and infrastructure. | Download frozen data, build the index, or configure guardrails. |
+| `notebooks/` | Top-to-bottom experiment and audit runs. | Reproduce development, validation, and held-out comparisons. |
+| `results/` | Saved run records and aggregate usage. | Inspect a completed experiment without rerunning a model. |
+| `demo/` | Presentation-only walkthrough and live Ask interface. | Demonstrate the system; it is not part of scoring. |
+| `docs/` | Detailed engineering rationale for retrieval and evaluation. | Review implementation decisions and metric definitions. |
 
 ## Setup
 
@@ -532,3 +604,78 @@ The walkthrough works from repository files alone. The Ask page additionally
 needs AWS credentials, Langfuse credentials, and Qdrant with the built
 collection; `GET /api/health` reports whether it is available. See
 [`demo/README.md`](demo/README.md) for details.
+
+## References
+
+The links below document the data, research methods, platforms, and software
+used by this project. Exact Python package versions are pinned in
+[`pyproject.toml`](pyproject.toml) and [`uv.lock`](uv.lock).
+
+### Primary data and filing standards
+
+- U.S. Securities and Exchange Commission — [EDGAR data APIs and XBRL Company
+  Facts documentation](https://www.sec.gov/search-filings/edgar-application-programming-interfaces).
+- Amazon.com, Inc. — [2025 Form 10-K](https://www.sec.gov/Archives/edgar/data/1018724/000101872426000004/amzn-20251231.htm) and [Company
+  Facts JSON](https://data.sec.gov/api/xbrl/companyfacts/CIK0001018724.json).
+- Alphabet Inc. — [2025 Form 10-K](https://www.sec.gov/Archives/edgar/data/1652044/000165204426000018/goog-20251231.htm) and [Company
+  Facts JSON](https://data.sec.gov/api/xbrl/companyfacts/CIK0001652044.json).
+- The Coca-Cola Company — [2025 Form 10-K](https://www.sec.gov/Archives/edgar/data/21344/000162828026010047/ko-20251231.htm) and [Company
+  Facts JSON](https://data.sec.gov/api/xbrl/companyfacts/CIK0000021344.json).
+
+### Financial-agent research and benchmark design
+
+- Lu et al. — [FinToolBench: Evaluating LLM Agents for Real-World Financial Tool
+  Use](https://arxiv.org/abs/2603.08262) · [implementation and evaluation
+  resources](https://github.com/Double-wk/FinToolBench). It informed the use of
+  visible tool traces and tool-execution metrics.
+- Zhu et al. — [FinMCP-Bench: Benchmarking LLM Agents for Real-World Financial
+  Tool Use under the Model Context Protocol](https://arxiv.org/abs/2603.24943)
+  · [dataset](https://huggingface.co/datasets/DianJin/FinMCP-Bench). It
+  informed the single-tool, multi-tool, and task-complexity framing.
+- Bigeard et al. — [Finance Agent Benchmark: Benchmarking LLMs on Real-world
+  Financial Research Tasks](https://arxiv.org/abs/2508.00828) · [benchmark
+  harness](https://github.com/vals-ai/finance-agent). It informed the
+  SEC-filing research task framing.
+- Krumdick et al. — [FrontierFinance: A Long-Horizon Computer-Use Benchmark of
+  Real-World Financial Tasks](https://arxiv.org/abs/2604.05912) ·
+  [FrontierFinance grader](https://github.com/samaya-ai/frontier-finance). It
+  informed detailed reporting across correctness, evidence, efficiency, and
+  cost.
+
+### Retrieval and evaluation methods
+
+- Cormack, Clarke, and Buettcher — [Reciprocal Rank Fusion Outperforms
+  Condorcet and Individual Rank Learning Methods](https://research.google/pubs/reciprocal-rank-fusion-outperforms-condorcet-and-individual-rank-learning-methods/).
+  The project uses RRF to combine dense and BM25 retrieval rankings.
+- Qdrant — [hybrid and multi-stage query documentation](https://qdrant.tech/documentation/search/hybrid-queries/) and [FastEmbed hybrid-search
+  example](https://qdrant.github.io/fastembed/examples/Hybrid_Search/).
+
+### Model, safety, and observability platforms
+
+- Amazon Web Services — [Amazon Bedrock documentation](https://docs.aws.amazon.com/bedrock/) and [Amazon Bedrock Guardrails
+  documentation](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html).
+- Anthropic — [Claude documentation](https://docs.anthropic.com/en/docs).
+- OpenAI — [API documentation](https://platform.openai.com/docs/overview).
+- Strands Agents — [SDK documentation](https://strandsagents.com/latest/).
+- Langfuse — [Strands Agents observability integration](https://langfuse.com/integrations/frameworks/strands-agents).
+- Amazon Web Services — [Amazon Bedrock AgentCore Memory documentation](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/memory-get-started.html).
+
+### Software and development tools
+
+- [Python](https://www.python.org/), [uv](https://docs.astral.sh/uv/), and
+  [Docker Compose](https://docs.docker.com/compose/).
+- [sec-parser](https://github.com/alphanome-ai/sec-parser),
+  [Beautiful Soup](https://www.crummy.com/software/BeautifulSoup/bs4/doc/),
+  [Requests](https://requests.readthedocs.io/), and
+  [python-dotenv](https://pypi.org/project/python-dotenv/).
+- [boto3](https://boto3.amazonaws.com/v1/documentation/api/latest/index.html),
+  [Qdrant Python client](https://python-client.qdrant.tech/),
+  [FastEmbed](https://qdrant.github.io/fastembed/),
+  and [Ragas](https://docs.ragas.io/).
+- [JupyterLab](https://jupyterlab.readthedocs.io/),
+  [IPython kernel](https://ipykernel.readthedocs.io/),
+  [pytest](https://docs.pytest.org/), and [Ruff](https://docs.astral.sh/ruff/).
+- [Starlette](https://www.starlette.io/),
+  [Uvicorn](https://www.uvicorn.org/), and
+  [sse-starlette](https://github.com/sysid/sse-starlette) for the optional demo
+  server and progress stream.
