@@ -25,6 +25,12 @@ dev = [
     "pytest==9.0.2",
     "ruff==0.12.12",
 ]
+demo = [
+    "starlette==1.6.0",
+    "sse-starlette==3.4.8",
+    "uvicorn==0.52.4",
+    "bedrock-agentcore==1.22.0",
+]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
