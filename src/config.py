@@ -147,6 +147,14 @@ DECOMPOSED_MATH_THINKING_BUDGET_TOKENS = int(
 DECOMPOSED_VERIFIER_THINKING_BUDGET_TOKENS = int(
     os.getenv("DECOMPOSED_VERIFIER_THINKING_BUDGET_TOKENS", "6000")
 )
+# Conversation context carried into a follow-up question. Bounded so a long chat
+# cannot grow the prompt without limit: keep only the most recent turns and clip
+# each remembered answer. A benchmark question passes no history, so these are
+# inert for scored runs.
+DECOMPOSED_CONTEXT_MAX_TURNS = int(os.getenv("DECOMPOSED_CONTEXT_MAX_TURNS", "4"))
+DECOMPOSED_CONTEXT_MAX_ANSWER_CHARS = int(
+    os.getenv("DECOMPOSED_CONTEXT_MAX_ANSWER_CHARS", "600")
+)
 
 LANGFUSE_PUBLIC_KEY = os.getenv("LANGFUSE_PUBLIC_KEY", "").strip()
 LANGFUSE_SECRET_KEY = os.getenv("LANGFUSE_SECRET_KEY", "").strip()
