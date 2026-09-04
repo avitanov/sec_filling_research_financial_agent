@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from time import perf_counter
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 from strands import Agent
 from strands.models import Model
@@ -28,7 +28,11 @@ from agent.observation import (
     observe_run,
     propagate_run_attributes,
 )
-from agent.plugins import ProviderRetryStrategy, RetryTrackingPlugin
+from agent.plugins import (
+    ProgressPlugin,
+    ProviderRetryStrategy,
+    RetryTrackingPlugin,
+)
 from agent.providers import ModelProvider, build_model
 from agent.tools import ProjectTools
 from config import (
@@ -36,9 +40,12 @@ from config import (
     AGENT_MAX_TOTAL_TOKENS,
     AGENT_MAX_TURNS,
     AWS_REGION,
+    BEDROCK_GUARDRAIL_CONFIG,
     BEDROCK_MANTLE_TIMEOUT_SECONDS,
     BEDROCK_NOVA_LITE_MODEL_ID,
     BEDROCK_SONNET_MODEL_ID,
+    DECOMPOSED_CONTEXT_MAX_ANSWER_CHARS,
+    DECOMPOSED_CONTEXT_MAX_TURNS,
     DECOMPOSED_MATH_MAX_TOKENS,
     DECOMPOSED_MATH_THINKING_BUDGET_TOKENS,
     DECOMPOSED_RESEARCH_MAX_TOKENS,
@@ -60,6 +67,7 @@ from models import (
     MathSubmission,
     ModelCallEvent,
     MonolithicAnswer,
+    QuestionInput,
     ResearchSubmission,
     RunRecord,
     VerifierSubmission,
@@ -134,6 +142,7 @@ class _StageResult:
     timeline: list[dict[str, Any]]
     retry_events: list[dict[str, Any]]
     retries: int
+    duration_ms: float
 
 
 def _stage_model(
@@ -145,9 +154,13 @@ def _stage_model(
     """Build one stage model, enabling Bedrock thinking for Sonnet only."""
     if provider == "bedrock":
         parameters: dict[str, Any] | None = None
+        temperature: float | None = 0
         if model_id == BEDROCK_SONNET_MODEL_ID and thinking_budget_tokens > 0:
+            if thinking_budget_tokens < 1024:
+                raise ValueError("Thinking budget must be at least 1024 tokens")
             if thinking_budget_tokens >= max_tokens:
                 raise ValueError("Thinking budget must be below maximum tokens")
+            temperature = None
             parameters = {
                 "additional_request_fields": {
                     "thinking": {
@@ -162,7 +175,9 @@ def _stage_model(
             region_name=AWS_REGION,
             timeout_seconds=BEDROCK_MANTLE_TIMEOUT_SECONDS,
             max_tokens=max_tokens,
+            temperature=temperature,
             model_parameters=parameters,
+            guardrail_config=BEDROCK_GUARDRAIL_CONFIG,
         )
     return build_model(
         provider=provider,
@@ -187,6 +202,55 @@ def _stage_model(
     )
 
 
+def _compact_history(
+    history: list[dict[str, str]] | None,
+    max_turns: int = DECOMPOSED_CONTEXT_MAX_TURNS,
+    max_answer_chars: int = DECOMPOSED_CONTEXT_MAX_ANSWER_CHARS,
+) -> list[dict[str, str]]:
+    """Compact a conversation history into a bounded context for a follow-up.
+
+    Keeps only the most recent ``max_turns`` completed question/answer pairs and
+    clips each remembered answer to ``max_answer_chars``, so an arbitrarily long
+    chat can never grow the stage prompt without limit.
+
+    Args:
+        history: Earlier turns, oldest first, each a ``{"question", "answer"}``.
+        max_turns: Most recent turns to keep.
+        max_answer_chars: Longest remembered answer before it is clipped.
+
+    Returns:
+        The bounded, cleaned turns, oldest first; empty when there is nothing to
+        carry.
+    """
+    if not history or max_turns <= 0:
+        return []
+    compact: list[dict[str, str]] = []
+    for turn in history[-max_turns:]:
+        question = (turn.get("question") or "").strip()
+        answer = (turn.get("answer") or "").strip()
+        if not question or not answer:
+            continue
+        if len(answer) > max_answer_chars:
+            answer = answer[:max_answer_chars].rstrip() + "…"
+        compact.append({"question": question, "answer": answer})
+    return compact
+
+
+def _context_preamble(context_turns: list[dict[str, str]]) -> str:
+    """Render compacted turns as a research-prompt preamble, or "" when empty."""
+    if not context_turns:
+        return ""
+    lines = [
+        "Earlier turns in this conversation (most recent last). Use them only to "
+        "resolve references in the question, such as an implied company, period, "
+        "or metric; re-verify every value with the tools:"
+    ]
+    for turn in context_turns:
+        lines.append(f"Q: {turn['question']}")
+        lines.append(f"A: {turn['answer']}")
+    return "\n".join(lines) + "\n"
+
+
 def _merge_token_usage(usages: list[dict[str, int]]) -> dict[str, int]:
     totals: dict[str, int] = {}
     for usage in usages:
@@ -203,6 +267,8 @@ class DecomposedAgentHarness:
         model_id: Optional provider model identifier.
         enable_verifier: Whether a separate verifier writes the final answer.
         enable_math_repair: Whether the verifier may request one Math retry.
+        math_thinking_budget_tokens: Optional Math-stage thinking budget override.
+        verifier_thinking_budget_tokens: Optional Verifier thinking budget override.
     """
 
     def __init__(
@@ -212,6 +278,8 @@ class DecomposedAgentHarness:
         *,
         enable_verifier: bool = True,
         enable_math_repair: bool = True,
+        math_thinking_budget_tokens: int | None = None,
+        verifier_thinking_budget_tokens: int | None = None,
     ) -> None:
         if enable_math_repair and not enable_verifier:
             raise ValueError("Math repair requires the verifier")
@@ -219,12 +287,27 @@ class DecomposedAgentHarness:
         self.model_id = model_id or (
             BEDROCK_NOVA_LITE_MODEL_ID if provider == "bedrock" else OPENROUTER_MODEL
         )
+        self.math_thinking_budget_tokens = (
+            DECOMPOSED_MATH_THINKING_BUDGET_TOKENS
+            if math_thinking_budget_tokens is None
+            else math_thinking_budget_tokens
+        )
+        self.verifier_thinking_budget_tokens = (
+            DECOMPOSED_VERIFIER_THINKING_BUDGET_TOKENS
+            if verifier_thinking_budget_tokens is None
+            else verifier_thinking_budget_tokens
+        )
+        if (
+            self.math_thinking_budget_tokens < 0
+            or self.verifier_thinking_budget_tokens < 0
+        ):
+            raise ValueError("Thinking budgets cannot be negative")
         self.research_reasoning_mode = "none"
         self.math_reasoning_mode = (
             "enabled"
             if (
                 self.model_id == BEDROCK_SONNET_MODEL_ID
-                and DECOMPOSED_MATH_THINKING_BUDGET_TOKENS > 0
+                and self.math_thinking_budget_tokens > 0
             )
             else "none"
         )
@@ -232,7 +315,7 @@ class DecomposedAgentHarness:
             "enabled"
             if (
                 self.model_id == BEDROCK_SONNET_MODEL_ID
-                and DECOMPOSED_VERIFIER_THINKING_BUDGET_TOKENS > 0
+                and self.verifier_thinking_budget_tokens > 0
             )
             else "none"
         )
@@ -257,6 +340,9 @@ class DecomposedAgentHarness:
         self.research_retry_tracking = RetryTrackingPlugin()
         self.math_retry_tracking = RetryTrackingPlugin()
         self.verifier_retry_tracking = RetryTrackingPlugin()
+        self.research_progress = ProgressPlugin(self._emit_progress)
+        self.math_progress = ProgressPlugin(self._emit_progress)
+        self._on_event: Callable[[dict[str, Any]], None] | None = None
         self._ready = False
         self.research_agent = Agent(
             model=_stage_model(provider, self.model_id, DECOMPOSED_RESEARCH_MAX_TOKENS),
@@ -268,7 +354,7 @@ class DecomposedAgentHarness:
             callback_handler=None,
             name="decomposed-sec-research",
             retry_strategy=ProviderRetryStrategy(max_attempts=MODEL_MAX_RETRIES + 1),
-            plugins=[self.research_retry_tracking],
+            plugins=[self.research_retry_tracking, self.research_progress],
             structured_output_model=ResearchSubmission,
             trace_attributes={
                 "architecture": "decomposed",
@@ -281,7 +367,7 @@ class DecomposedAgentHarness:
                 provider,
                 self.model_id,
                 DECOMPOSED_MATH_MAX_TOKENS,
-                DECOMPOSED_MATH_THINKING_BUDGET_TOKENS,
+                self.math_thinking_budget_tokens,
             ),
             system_prompt=MATH_PROMPT if enable_verifier else MATH_WRITER_PROMPT,
             tools=[self.math_tools.calculate],
@@ -292,7 +378,7 @@ class DecomposedAgentHarness:
                 else "decomposed-sec-math-writer"
             ),
             retry_strategy=ProviderRetryStrategy(max_attempts=MODEL_MAX_RETRIES + 1),
-            plugins=[self.math_retry_tracking],
+            plugins=[self.math_retry_tracking, self.math_progress],
             structured_output_model=(
                 MathSubmission if enable_verifier else MonolithicAnswer
             ),
@@ -308,7 +394,7 @@ class DecomposedAgentHarness:
                     provider,
                     self.model_id,
                     DECOMPOSED_VERIFIER_MAX_TOKENS,
-                    DECOMPOSED_VERIFIER_THINKING_BUDGET_TOKENS,
+                    self.verifier_thinking_budget_tokens,
                 ),
                 system_prompt=VERIFIER_PROMPT,
                 tools=[],
@@ -327,6 +413,60 @@ class DecomposedAgentHarness:
             )
             if enable_verifier
             else None
+        )
+
+    def _resolve_question(
+        self, question: str, ticker: str | None, started_at: datetime
+    ) -> QuestionInput:
+        """Return the frozen benchmark question, or build an ad-hoc one.
+
+        Args:
+            question: Question text typed by a caller.
+            ticker: Company required when the question is not part of the benchmark.
+            started_at: Run start time used to build an ad-hoc question ID.
+
+        Returns:
+            The matching frozen question, or a new ad-hoc question record.
+
+        Raises:
+            ValueError: If an unknown question arrives without a known ticker.
+        """
+        frozen = self._questions_by_text.get(question)
+        if frozen is not None:
+            return frozen
+        if ticker is None:
+            raise ValueError("Question is not part of the frozen benchmark data")
+        company_questions = load_questions(ticker)
+        if not company_questions:
+            raise ValueError(f"Company {ticker!r} is not part of the benchmark data")
+        return QuestionInput(
+            question_id=f"adhoc-{started_at.strftime('%Y%m%dT%H%M%S%fZ')}",
+            split="adhoc",
+            ticker=company_questions[0].ticker,
+            company=company_questions[0].company,
+            category="adhoc",
+            question=question,
+        )
+
+    def _emit_progress(self, event: dict[str, Any]) -> None:
+        """Forward one observable progress event to the current listener."""
+        if self._on_event is not None:
+            self._on_event(event)
+
+    def _emit_verification(self, verifier: _StageResult) -> None:
+        """Report one verifier decision to the current listener."""
+        output = verifier.output
+        if not isinstance(output, VerifierSubmission):
+            return
+        self._emit_progress(
+            {
+                "type": "verification",
+                "stage": "verifier",
+                "attempt": verifier.attempt,
+                "approved": output.approved,
+                "rejection_reason": output.rejection_reason,
+                "retry_stage": output.retry_stage,
+            }
         )
 
     def _reset_for_question(self) -> None:
@@ -349,6 +489,12 @@ class DecomposedAgentHarness:
     ) -> _StageResult:
         agent.messages.clear()
         retry_tracking.reset()
+        for progress in (self.research_progress, self.math_progress):
+            progress.set_stage(stage)
+        self._emit_progress(
+            {"type": "stage_started", "stage": stage, "attempt": attempt}
+        )
+        stage_timer = perf_counter()
         output: Any | None = None
         error: Exception | None = None
         try:
@@ -365,6 +511,16 @@ class DecomposedAgentHarness:
             output = result.structured_output
         except Exception as caught:
             error = caught
+        duration_ms = round((perf_counter() - stage_timer) * 1000, 2)
+        self._emit_progress(
+            {
+                "type": "stage_finished",
+                "stage": stage,
+                "attempt": attempt,
+                "duration_ms": duration_ms,
+                "error": str(error) if error else None,
+            }
+        )
         token_usage, model_calls = extract_model_metrics(
             agent.event_loop_metrics.get_summary(), self.model_id
         )
@@ -395,6 +551,7 @@ class DecomposedAgentHarness:
                 for event in retry_tracking.events
             ],
             retries=retry_tracking.count,
+            duration_ms=duration_ms,
         )
 
     def _record_model_usage(self, stages: list[_StageResult]) -> None:
@@ -427,15 +584,21 @@ class DecomposedAgentHarness:
         }
 
     def _run_research(
-        self, question: str, company: str, ticker: str, attempt: int
+        self,
+        question: str,
+        company: str,
+        ticker: str,
+        attempt: int,
+        context_turns: list[dict[str, str]] | None = None,
     ) -> _StageResult:
         self.research_tools.set_agent_attempt(attempt)
+        preamble = _context_preamble(context_turns or [])
         return self._run_stage(
             "research",
             attempt,
             self.research_agent,
             self.research_retry_tracking,
-            f"Company: {company}\nTicker: {ticker}\nQuestion: {question}",
+            f"Company: {company}\nTicker: {ticker}\n{preamble}Question: {question}",
         )
 
     def _run_math(
@@ -444,12 +607,15 @@ class DecomposedAgentHarness:
         research: ResearchSubmission,
         attempt: int,
         feedback: str = "",
+        context_turns: list[dict[str, str]] | None = None,
     ) -> _StageResult:
         self.math_tools.set_agent_attempt(attempt)
         payload: dict[str, Any] = {
             "question": question,
             "research": research.model_dump(),
         }
+        if context_turns:
+            payload["conversation_context"] = context_turns
         if feedback:
             payload["verifier_feedback"] = feedback
         return self._run_stage(
@@ -466,32 +632,58 @@ class DecomposedAgentHarness:
         research: ResearchSubmission,
         math: MathSubmission,
         attempt: int,
+        context_turns: list[dict[str, str]] | None = None,
     ) -> _StageResult:
         if self.verifier_agent is None:
             raise RuntimeError("Verifier is disabled for this pipeline variant")
+        payload: dict[str, Any] = {
+            "question": question,
+            "research": research.model_dump(),
+            "math": math.model_dump(),
+        }
+        if context_turns:
+            payload["conversation_context"] = context_turns
         return self._run_stage(
             "verifier",
             attempt,
             self.verifier_agent,
             self.verifier_retry_tracking,
-            json.dumps(
-                {
-                    "question": question,
-                    "research": research.model_dump(),
-                    "math": math.model_dump(),
-                }
-            ),
+            json.dumps(payload),
         )
 
-    def run_question(self, question: str, *, persist: bool = True) -> RunRecord:
-        """Run one question through the configured decomposed stages."""
+    def run_question(
+        self,
+        question: str,
+        *,
+        persist: bool = True,
+        ticker: str | None = None,
+        on_event: Callable[[dict[str, Any]], None] | None = None,
+        history: list[dict[str, str]] | None = None,
+    ) -> RunRecord:
+        """Run one question through the configured decomposed stages.
+
+        Args:
+            question: Frozen benchmark question, or any question when ticker is set.
+            persist: Whether to append the record to the local run log. Ad-hoc
+                questions are never persisted because they have no gold answer.
+            ticker: Company scope required for a question outside the benchmark.
+            on_event: Optional listener for observable stage and tool progress.
+            history: Earlier turns of a conversation, oldest first, each a
+                ``{"question", "answer"}`` pair. Compacted and carried into the
+                stages so a follow-up can resolve references to earlier answers.
+                A benchmark question passes none, so scored runs are unaffected.
+
+        Returns:
+            The complete run record for this question.
+        """
         self.preflight()
-        question_record = self._questions_by_text.get(question)
-        if question_record is None:
-            raise ValueError("Question is not part of the frozen benchmark data")
-        self._reset_for_question()
+        self._on_event = on_event
+        context_turns = _compact_history(history)
         timer = perf_counter()
         started_at = datetime.now(UTC)
+        question_record = self._resolve_question(question, ticker, started_at)
+        is_adhoc = question_record.split == "adhoc"
+        self._reset_for_question()
         run_id = (
             f"{question_record.question_id}-{started_at.strftime('%Y%m%dT%H%M%S%fZ')}"
         )
@@ -521,13 +713,17 @@ class DecomposedAgentHarness:
                     question_record.company,
                     question_record.ticker,
                     attempt=1,
+                    context_turns=context_turns,
                 )
                 stages.append(research)
                 if research.error is None and isinstance(
                     research.output, ResearchSubmission
                 ):
                     math = self._run_math(
-                        question_record.question, research.output, attempt=1
+                        question_record.question,
+                        research.output,
+                        attempt=1,
+                        context_turns=context_turns,
                     )
                     stages.append(math)
                 else:
@@ -543,8 +739,10 @@ class DecomposedAgentHarness:
                         research.output,
                         math.output,
                         attempt=1,
+                        context_turns=context_turns,
                     )
                     stages.append(verifier)
+                    self._emit_verification(verifier)
                 if (
                     self.enable_math_repair
                     and self.enable_verifier
@@ -563,6 +761,7 @@ class DecomposedAgentHarness:
                             research.output,
                             attempt=2,
                             feedback=feedback or "",
+                            context_turns=context_turns,
                         )
                         stages.append(math)
 
@@ -577,8 +776,10 @@ class DecomposedAgentHarness:
                             research.output,
                             math.output,
                             attempt=2,
+                            context_turns=context_turns,
                         )
                         stages.append(verifier)
+                        self._emit_verification(verifier)
             failed_stage = next((stage for stage in stages if stage.error), None)
             if failed_stage is not None:
                 failure_category = (
@@ -662,10 +863,11 @@ class DecomposedAgentHarness:
             langfuse_trace_id=trace_id,
             langfuse_trace_url=trace_url,
         )
-        if persist:
+        if persist and not is_adhoc:
             self.run_records_path.parent.mkdir(parents=True, exist_ok=True)
             with self.run_records_path.open("a", encoding="utf-8") as output:
                 output.write(record.model_dump_json() + "\n")
+        self._on_event = None
         return record
 
     def load_records(self) -> list[RunRecord]:

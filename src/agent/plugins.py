@@ -1,11 +1,16 @@
 """Provide small Strands plugins used by the research agents."""
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Callable
 
 from botocore.exceptions import EventStreamError
 from botocore.exceptions import ReadTimeoutError as BotocoreReadTimeoutError
 from strands import ModelRetryStrategy
-from strands.hooks import AfterModelCallEvent, HookOrder
+from strands.hooks import (
+    AfterModelCallEvent,
+    AfterToolCallEvent,
+    BeforeToolCallEvent,
+    HookOrder,
+)
 from strands.plugins import Plugin
 from urllib3.exceptions import ReadTimeoutError as Urllib3ReadTimeoutError
 
@@ -72,3 +77,49 @@ class RetryTrackingPlugin(Plugin):
             AfterModelCallEvent,
             order=HookOrder.SDK_LAST,
         )
+
+
+class ProgressPlugin(Plugin):
+    """Report tool activity to a callback while an agent stage is running."""
+
+    name = "progress"
+
+    def __init__(self, on_event: Callable[[dict[str, Any]], None]) -> None:
+        super().__init__()
+        self._on_event = on_event
+        self._stage: str | None = None
+
+    def _report_tool_call(self, event: BeforeToolCallEvent) -> None:
+        self._on_event(
+            {
+                "type": "tool_call",
+                "stage": self._stage,
+                "tool": event.tool_use.get("name"),
+                "arguments": event.tool_use.get("input") or {},
+            }
+        )
+
+    def _report_tool_result(self, event: AfterToolCallEvent) -> None:
+        self._on_event(
+            {
+                "type": "tool_result",
+                "stage": self._stage,
+                "tool": event.tool_use.get("name"),
+                "status": (event.result or {}).get("status", "unknown"),
+                "content": (event.result or {}).get("content", []),
+                "duration": event.duration,
+            }
+        )
+
+    def set_stage(self, stage: str | None) -> None:
+        """Label subsequent tool events with the stage that produced them."""
+        self._stage = stage
+
+    def init_agent(self, agent: "Agent") -> None:
+        """Register tool progress reporting on one agent.
+
+        Args:
+            agent: Strands agent receiving the plugin.
+        """
+        agent.add_hook(self._report_tool_call, BeforeToolCallEvent)
+        agent.add_hook(self._report_tool_result, AfterToolCallEvent)

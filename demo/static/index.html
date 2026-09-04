@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Auditable SEC Filing Research — how an answer is produced</title>
+    <meta
+      name="description"
+      content="A step-by-step walkthrough of a verification-first financial research pipeline, with the verified reference answer and every measurement for each question."
+    />
+    <link rel="stylesheet" href="/static/css/app.css" />
+    <link rel="stylesheet" href="/static/css/story.css" />
+  </head>
+  <body>
+    <header class="shell">
+      <div class="shell__brand">
+        <span class="shell__mark" aria-hidden="true">
+          <svg viewBox="0 0 20 20" width="17" height="17" fill="none">
+            <path
+              d="M3 15.5V7.2L7.4 4l4.3 3.1L16.9 3v9.6"
+              stroke="currentColor"
+              stroke-width="1.7"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+            <circle cx="16.9" cy="15.6" r="1.7" fill="currentColor" />
+          </svg>
+        </span>
+        <span class="shell__title">
+          <strong>Auditable SEC Filing Research</strong>
+          <span>Verified answers with a complete audit trail</span>
+        </span>
+      </div>
+      <nav class="shell__nav" aria-label="Pages">
+        <a href="/" aria-current="page">Walkthrough</a>
+        <a href="/chat">Ask</a>
+      </nav>
+      <div class="shell__meta" id="shell-meta"></div>
+    </header>
+
+    <main class="page">
+      <aside class="rail" aria-labelledby="rail-heading">
+        <p class="eyebrow" id="rail-heading">Worked examples</p>
+        <ul id="example-list" class="rail__list"></ul>
+        <div class="rail__foot">
+          <p id="scope-note"></p>
+        </div>
+      </aside>
+
+      <div class="content">
+        <section class="brief" aria-labelledby="brief-title">
+          <div class="chip-row" id="brief-badges"></div>
+          <h1 id="brief-title">Loading…</h1>
+          <p class="brief__why" id="brief-why"></p>
+          <blockquote class="brief__question">
+            <span class="eyebrow">Question asked</span>
+            <p id="brief-question"></p>
+          </blockquote>
+        </section>
+
+        <section class="section" aria-labelledby="flow-title">
+          <div class="section__head">
+            <h3 id="flow-title">Pipeline</h3>
+            <p>Each stage hands verified work to the next; nothing is invented downstream.</p>
+          </div>
+          <div id="diagram"></div>
+        </section>
+
+        <section class="section" aria-labelledby="kpi-title">
+          <div class="section__head">
+            <h3 id="kpi-title">Outcome at a glance</h3>
+            <p>Measured on this question alone.</p>
+          </div>
+          <div id="kpis"></div>
+        </section>
+
+        <section class="section" aria-labelledby="trace-title">
+          <div class="section__head">
+            <h3 id="trace-title">What happened, in order</h3>
+            <p>Observable actions only — no hidden reasoning is stored or shown.</p>
+          </div>
+          <div class="controls" role="group" aria-label="Playback">
+            <button class="button button--primary" id="play" type="button">
+              Play walkthrough
+            </button>
+            <button class="button" id="prev" type="button">Back</button>
+            <button class="button" id="next" type="button">Step</button>
+            <button class="button button--ghost" id="reveal" type="button">
+              Show all steps
+            </button>
+            <button class="button button--ghost" id="restart" type="button">Reset</button>
+            <p class="controls__progress num" id="progress" aria-live="polite"></p>
+          </div>
+          <div class="trace" id="trace"></div>
+        </section>
+
+        <div id="outcome"></div>
+      </div>
+    </main>
+
+    <script type="module" src="/static/js/story.js"></script>
+  </body>
+</html>
