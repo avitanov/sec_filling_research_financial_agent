@@ -4,6 +4,13 @@ This MVP compares a monolithic filing-research agent with a verification-first
 pipeline using the same frozen SEC evidence. This project includes the reproducible
 parsing, chunking, embedding, and retrieval foundation for that comparison.
 
+A small two-page web demo (`demo/`) makes the pipeline legible to an audience: a
+scripted walkthrough of curated runs and a live chat that answers questions on
+demand about the three companies' 10-K filings, with every number shown against
+its evidence. It is presentation tooling only — see the
+[Presentation demo](#presentation-demo) section below and
+[`demo/README.md`](demo/README.md).
+
 ## Setup
 
 The project requires Python 3.11 or newer and
@@ -458,3 +465,70 @@ both. Research handoffs sometimes omitted returned facts, Math reused the same
 ratio-versus-growth mistakes, and the LLM verifier sometimes rejected correct
 work or approved wrong calculations without requesting repair. This development
 experiment improves diagnosis, not yet verified financial reliability.
+
+## Held-out architecture experiment results
+
+[`Notebook 04`](notebooks/04_sonnet45_final_comparison.ipynb) compares four
+architecture configurations on the same 16-question Coca-Cola held-out test set.
+The table below contains the selected presentation metrics from those recorded
+experiments. Estimated cost is the total answer-generation cost for all 16 runs;
+LLM-judge cost is separate.
+
+| Metric | Monolithic | Decomposed + Verifier, no thinking | Decomposed without Verifier | Decomposed + Verifier, reasoning |
+| --- | ---: | ---: | ---: | ---: |
+| Numerical correctness rate | 37.50% | 68.75% | 68.75% | 75.00% |
+| Evidence validity rate | 100.00% | 100.00% | 100.00% | 100.00% |
+| Formula correctness rate | 58.33% | 66.67% | 75.00% | 58.33% |
+| Formatting correctness rate | 87.50% | 87.50% | 87.50% | 87.50% |
+| Audit-trail completeness rate | 56.25% | 68.75% | 68.75% | 56.25% |
+| Unsupported-number rate | 6.90% | 25.00% | 8.11% | 3.12% |
+| Tool F1 | 98.36% | 98.36% | 96.77% | 96.77% |
+| Conditional execution rate | 97.92% | 97.92% | 95.83% | 95.83% |
+| Average latency | 17,178.55 ms | 29,139.18 ms | 29,441.10 ms | 43,482.96 ms |
+| Estimated cost, 16 runs | $1.073958 | $1.585908 | $1.622322 | $1.664871 |
+| Judge LLM answer-correctness grade | 4.25/5 | 4.56/5 | 4.81/5 | 4.19/5 |
+| Judge chronological-coherence grade | 4.94/5 | 4.94/5 | 4.81/5 | 5.00/5 |
+| Judge workflow-efficiency grade | 4.62/5 | 4.62/5 | 3.94/5 | 4.69/5 |
+
+The decomposed approach with a verifier is the best overall choice because it
+provides a clearer audit trail showing where each number came from and how it
+was calculated, while improving numerical correctness from 37.50% for the
+monolithic agent to 68.75%. However, the verifier did not correct any final
+answers in this experiment, so the results do not prove that verification
+itself caused the improvement on our benchmark. Enabling additional reasoning produced the
+highest numerical correctness at 75.00%, but it reduced formula correctness and
+audit-trail completeness, increased average latency to 43.48 seconds, cost
+more, and received a lower LLM-judge answer grade. Overall, decomposition
+improved accuracy and traceability, but the verifier and additional reasoning
+did not consistently improve every aspect of performance.
+
+## Presentation demo
+
+A two-page web demo makes the pipeline legible to an audience. It is
+presentation tooling only: it never writes run records and never changes how runs
+are scored.
+
+```bash
+uv sync --group demo
+uv run uvicorn demo.server:app --port 8000
+```
+
+- `http://localhost:8000/` plays the four curated held-out Coca-Cola runs step by
+  step against a pipeline diagram, then shows the verified reference answer, a
+  value-by-value comparison, every saved question-level metric, and what the
+  deterministic evaluation found wrong.
+- `http://localhost:8000/chat` answers questions on demand for any of the three
+  companies — name one in the question — showing short phase words while the
+  pipeline works and keeping the step-by-step detail in a collapsed audit trail.
+  Conversations are multi-turn — follow-ups reuse the conversation's company and
+  earlier answers as context — and one question is answered at a time. Three
+  recommended questions sit outside the frozen benchmark, and every conversation
+  is saved to Amazon Bedrock AgentCore Memory so old chats reopen after a reload.
+
+The demo deliberately shows product names rather than model or pipeline
+identifiers, and reports latency in seconds.
+
+The walkthrough works from repository files alone. The Ask page additionally
+needs AWS credentials, Langfuse credentials, and Qdrant with the built
+collection; `GET /api/health` reports whether it is available. See
+[`demo/README.md`](demo/README.md) for details.

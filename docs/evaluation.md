@@ -50,6 +50,7 @@ paying to run the research agent again.
 | Audit-trail completeness | The answer, evidence, periods, and calculations form a complete reproducible record. | A correct 32.21% answer fails the audit if its saved calculator event shows only 132.21%. |
 | Tool metrics | Required tools were used, unnecessary tools were avoided, and calls succeeded. | A normalized revenue question should use `lookup_fact`; calling only `search_filing` lowers the tool score. |
 | Retrieval metrics | Relevant evidence appeared in the first five results and unrelated results were limited. | Finding the required filing table at rank 3 passes Evidence Recall@5. |
+| LLM-judge metrics | Qualitative 1–5 grades describe answer quality and the visible workflow in ways that exact checks cannot fully capture. | A numerically correct answer can receive a lower workflow-efficiency grade when its trace contains unnecessary repeated calls. |
 | Reliability and cost | Successes, failures, retries, repairs, latency, tokens, and known costs are reported. | A Bedrock timeout is recorded as a failed run with its retry count and consumed tokens. |
 
 Formula correctness applies only to the 12 calculation questions per company.
@@ -131,12 +132,48 @@ batch. Neither option reruns the research pipeline.
 Unknown prices remain unknown and reduce `cost_coverage_rate`; they are not
 silently counted as free.
 
-## Exploratory LLM review
+## LLM-judge metrics
 
-The code can optionally use Haiku 4.5 to give descriptive 1–5 grades for answer
-quality and workflow. These subjective grades help explain development runs but
-are not part of the official deterministic score and cannot override a failed
-number, period, formula, or audit check.
+The optional Haiku 4.5 judge adds an important qualitative view of each saved
+run. Deterministic metrics establish whether exact requirements passed, while
+the judge helps distinguish runs that have the same pass/fail result but differ
+in clarity, completeness, sequencing, or unnecessary work.
+
+The judge receives the question, gold requirements, deterministic checks, final
+answer, and observable tool events. It does not receive hidden chain-of-thought.
+It returns these five metrics:
+
+| Metric | What the judge assesses |
+| --- | --- |
+| LLM answer correctness | Whether the final response is semantically correct and complete, including whether each number refers to the requested financial concept. |
+| Workflow correctness | Whether the visible evidence and calculations form a valid solution to the question. |
+| Chronological coherence | Whether inputs exist before dependent work uses them and, after a repair, whether the final answer uses the accepted attempt. Independent operations may appear in any valid order. |
+| Workflow efficiency | Whether calls are relevant and avoid unnecessary repetition. One justified repair is not penalized. |
+| Auditability | Whether a reviewer can reconstruct how the evidence and calculations produced the answer. This is scored independently from correctness because a wrong result can still have a trace that clearly exposes the error. |
+
+Every metric uses the same ordinal scale:
+
+| Grade | Interpretation |
+| ---: | --- |
+| 1 | Materially wrong or unusable. |
+| 2 | Major problems. |
+| 3 | Adequate, with important weaknesses. |
+| 4 | Correct, with only minor weaknesses. |
+| 5 | Fully correct, coherent, efficient, and easy to audit. |
+
+Evaluation saves the per-question grades and a short explanation in
+`judge_records.jsonl`. The summary reports the average of each metric over
+successful judge calls, including averages by question category. It also reports
+judge success rate, invocations, retries, tokens, estimated cost, and cost
+coverage so the reliability and expense of this evaluation layer remain visible.
+
+These metrics are complementary evidence, not replacements for the official
+deterministic scores. They cannot override a failed number, unit, period,
+formula, evidence, or audit check. Architecture comparisons must use the same
+judge model, prompt, inputs, and settings, report judge failures separately, and
+avoid treating small average differences as proof of superiority. The grades are
+subjective and may vary across repeated calls, so conclusions should be checked
+against the saved trace and the judge's explanation.
 
 ## Main rule
 
